@@ -51,6 +51,47 @@ enum Geometry {
         return CGPoint(x: x, y: y)
     }
 
+    /// A random point inside some screen's visibleFrame that is not inside any of
+    /// `blockers`. Returns nil when the blockers leave nowhere to go, so the caller
+    /// can take a breather instead of forcing a move it would have to correct.
+    static func randomVisiblePointCG(avoiding blockers: [CGRect], inset: CGFloat = 6) -> CGPoint? {
+        guard !blockers.isEmpty else { return randomVisiblePointCG(inset: inset) }
+
+        // Rejection sampling: for any sane layout this keeps exactly the same
+        // area-weighted, screen-weighted distribution as the unobstructed case.
+        for _ in 0..<48 {
+            let p = randomVisiblePointCG(inset: inset)
+            if !blockers.contains(where: { $0.contains(p) }) { return p }
+        }
+
+        // Blocked areas cover most of the screen. Fall back to a coarse cell scan so a
+        // small free pocket is still found, picking among free CELLS so the result
+        // stays roughly area-uniform rather than clustering on one lucky sample.
+        let cols = 24, rows = 16
+        var free: [CGRect] = []
+        for region in visibleRegionsCG() {
+            let r = region.insetBy(dx: min(inset, region.width / 2),
+                                   dy: min(inset, region.height / 2))
+            guard r.width > 0, r.height > 0 else { continue }
+            let cw = r.width / CGFloat(cols), ch = r.height / CGFloat(rows)
+            for i in 0..<cols {
+                for j in 0..<rows {
+                    let cell = CGRect(x: r.minX + CGFloat(i) * cw, y: r.minY + CGFloat(j) * ch,
+                                      width: cw, height: ch)
+                    let c = CGPoint(x: cell.midX, y: cell.midY)
+                    if !blockers.contains(where: { $0.contains(c) }) { free.append(cell) }
+                }
+            }
+        }
+        guard let cell = free.randomElement() else { return nil }
+        for _ in 0..<12 {
+            let p = CGPoint(x: CGFloat.random(in: cell.minX...cell.maxX),
+                            y: CGFloat.random(in: cell.minY...cell.maxY))
+            if !blockers.contains(where: { $0.contains(p) }) { return p }
+        }
+        return CGPoint(x: cell.midX, y: cell.midY)
+    }
+
     /// Clamp a CG point into the nearest visible region so motion never wanders
     /// onto the menu bar / off-screen.
     static func clampToVisible(_ p: CGPoint) -> CGPoint {

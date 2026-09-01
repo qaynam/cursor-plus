@@ -28,7 +28,7 @@ final class AppController: NSObject, NSApplicationDelegate {
                                              syntheticLog: syntheticLog)
     private lazy var stateMachine = StateMachine(settings: settings, input: inputEngine, autoPause: autoPause)
     private let menu = MenuBarController()
-    private lazy var zoneEditor = ClickZoneEditorController(settings: settings)
+    private lazy var zoneEditor = ZoneEditorController(settings: settings)
 
     private var permissionPoll: Timer?
     private var safetyWatchdog: Timer?
@@ -255,14 +255,33 @@ final class AppController: NSObject, NSApplicationDelegate {
     }
 
     @objc func editClickAreas() {
-        stateMachine.uiHold = true   // freeze motion so the bot doesn't fight the user
-        refreshUI()
-        zoneEditor.open()
+        openZoneEditor(.click)
     }
 
     @objc func clearClickAreas() {
         settings.saveClickZones([])
         refreshUI()
+    }
+
+    @objc func toggleAvoidZones() {
+        settings.avoidZonesEnabled.toggle()
+        refreshUI()
+    }
+
+    @objc func editAvoidAreas() {
+        openZoneEditor(.avoid)
+    }
+
+    @objc func clearAvoidAreas() {
+        settings.saveAvoidZones([])
+        refreshUI()
+    }
+
+    /// Both editors are the same overlay; Tab switches between them from inside it.
+    private func openZoneEditor(_ kind: ZoneKind) {
+        stateMachine.uiHold = true   // freeze motion so the bot doesn't fight the user
+        refreshUI()
+        zoneEditor.open(kind)
     }
 
     @objc func openAccessibilitySettings() {
@@ -277,6 +296,7 @@ final class AppController: NSObject, NSApplicationDelegate {
         settings.idlePausesEnabled = true
         settings.longPausesEnabled = false
         settings.clickZonesEnabled = true
+        settings.avoidZonesEnabled = true
         reconcilePowerAssertion(running: stateMachine.isOn)
         refreshUI()
     }
@@ -347,6 +367,8 @@ final class AppController: NSObject, NSApplicationDelegate {
             longPausesEnabled: settings.longPausesEnabled,
             clickZonesEnabled: settings.clickZonesEnabled,
             clickZoneCount: settings.loadClickZones().count,
+            avoidZonesEnabled: settings.avoidZonesEnabled,
+            avoidZoneCount: settings.loadAvoidZones().count,
             speedPresetTag: currentSpeedPresetTag(),
             intervalPresetTag: currentIntervalPresetTag()
         ))

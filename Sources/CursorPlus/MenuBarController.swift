@@ -14,6 +14,8 @@ struct MenuState {
     let longPausesEnabled: Bool
     let clickZonesEnabled: Bool
     let clickZoneCount: Int
+    let avoidZonesEnabled: Bool
+    let avoidZoneCount: Int
     let speedPresetTag: Int      // -1 = custom
     let intervalPresetTag: Int   // -1 = custom
 }
@@ -34,6 +36,9 @@ final class MenuBarController {
     private var clickZonesItem: NSMenuItem!
     private var editZonesItem: NSMenuItem!
     private var clearZonesItem: NSMenuItem!
+    private var avoidZonesItem: NSMenuItem!
+    private var editAvoidItem: NSMenuItem!
+    private var clearAvoidItem: NSMenuItem!
     private var speedItems: [NSMenuItem] = []
     private var intervalItems: [NSMenuItem] = []
     private var stopHintItem: NSMenuItem!
@@ -155,6 +160,27 @@ final class MenuBarController {
 
         menu.addItem(.separator())
 
+        // Avoid areas: regions the cursor is never allowed to enter or aim at.
+        avoidZonesItem = NSMenuItem(title: "Avoid defined areas",
+                                    action: #selector(AppController.toggleAvoidZones),
+                                    keyEquivalent: "")
+        avoidZonesItem.target = controller
+        menu.addItem(avoidZonesItem)
+
+        editAvoidItem = NSMenuItem(title: "Edit avoid areas…",
+                                   action: #selector(AppController.editAvoidAreas),
+                                   keyEquivalent: "")
+        editAvoidItem.target = controller
+        menu.addItem(editAvoidItem)
+
+        clearAvoidItem = NSMenuItem(title: "Clear avoid areas",
+                                    action: #selector(AppController.clearAvoidAreas),
+                                    keyEquivalent: "")
+        clearAvoidItem.target = controller
+        menu.addItem(clearAvoidItem)
+
+        menu.addItem(.separator())
+
         let permItem = NSMenuItem(title: "Open Accessibility Settings…",
                                   action: #selector(AppController.openAccessibilitySettings),
                                   keyEquivalent: "")
@@ -202,6 +228,13 @@ final class MenuBarController {
             ? "Edit click areas (\(state.clickZoneCount))…"
             : "Add a click area…"
         clearZonesItem.isEnabled = state.clickZoneCount > 0
+
+        avoidZonesItem.state = state.avoidZonesEnabled ? .on : .off
+        avoidZonesItem.isEnabled = state.avoidZoneCount > 0   // nothing to avoid with no areas
+        editAvoidItem.title = state.avoidZoneCount > 0
+            ? "Edit avoid areas (\(state.avoidZoneCount))…"
+            : "Add an avoid area…"
+        clearAvoidItem.isEnabled = state.avoidZoneCount > 0
 
         for (i, item) in speedItems.enumerated() {
             item.state = (i == state.speedPresetTag) ? .on : .off

@@ -1,11 +1,25 @@
 import Foundation
 import CoreGraphics
 
-/// A user-defined rectangular region the cursor is allowed to occasionally click,
-/// stored in CG global TOP-LEFT coordinates (the same plane CGEvent / the cursor
-/// use). Persisted as JSON in UserDefaults. Codable via plain Doubles because
-/// CGRect is not Codable out of the box.
-struct ClickZone: Codable, Equatable {
+/// The two kinds of user-drawn rectangle Cursor+ understands. Both are stored in
+/// CG global TOP-LEFT coordinates and edited with the same overlay editor.
+enum ZoneKind: CaseIterable {
+    /// Somewhere the cursor may occasionally curve to and click.
+    case click
+    /// Somewhere the cursor must never enter: it is never chosen as a target and
+    /// every path is routed around it.
+    case avoid
+
+    var other: ZoneKind { self == .click ? .avoid : .click }
+}
+
+/// A user-defined rectangular region, stored in CG global TOP-LEFT coordinates
+/// (the same plane CGEvent / the cursor use). Persisted as JSON in UserDefaults.
+/// Codable via plain Doubles because CGRect is not Codable out of the box.
+///
+/// The same shape backs both click areas and avoid areas, so the on-disk format
+/// for the two lists is identical.
+struct ZoneRect: Codable, Equatable {
     var x: Double
     var y: Double
     var width: Double

@@ -47,19 +47,33 @@ enum MovementEngine {
     // MARK: - WindMouse path generation
 
     /// WindMouse (ben.land) human-mouse-movement physics. Produces a curved,
-    /// never-identical polyline from `start` to `dest`. The intrinsic velocity
-    /// variation gives natural overshoot/correction; the per-class px/s in
-    /// `PathPlayer` controls overall pace.
+    /// never-identical polyline from `start` through every waypoint, ending on the
+    /// last one. The intrinsic velocity variation gives natural overshoot/correction;
+    /// the per-class px/s in `PathPlayer` controls overall pace.
+    ///
+    /// Intermediate waypoints are **via-points**, not stops. The loop hands over to
+    /// the next one as soon as it comes within `viaRadius` (always outside the damping
+    /// band), carrying its velocity and wind state across, so the cursor swings
+    /// through a corner in one continuous arc. Chaining separate paths instead would
+    /// decelerate, stop and set off again at every corner, and a repeated stop-start
+    /// seam is exactly the kind of structure a classifier keys on. Momentum through
+    /// the turn also carries the path to the *outside* of the corner, which for a
+    /// detour is the side away from the obstacle.
+    ///
+    /// Only the final waypoint gets the usual damped, land-exactly arrival.
     ///
     /// Parameters are passed in (rather than fixed) so callers can randomize them
     /// per move — a constant `(G,W,M,D)` makes every path share one statistical
     /// signature, which is exactly what a trained classifier keys on.
     static func windMousePath(from start: CGPoint,
-                              to dest: CGPoint,
+                              through waypoints: [CGPoint],
                               gravity G: Double = 9,
                               wind W: Double = 3,
                               maxStep Mmax: Double = 15,
-                              dampDistance D: Double = 12) -> [CGPoint] {
+                              dampDistance D: Double = 12,
+                              viaRadius: Double = 24) -> [CGPoint] {
+        guard let final = waypoints.last else { return [start] }
+
         var points: [CGPoint] = []
         let sqrt3 = 3.0.squareRoot()
         let sqrt5 = 5.0.squareRoot()
@@ -69,56 +83,81 @@ enum MovementEngine {
         var wx = 0.0, wy = 0.0
         var M = Mmax
 
-        var dist = hypot(dest.x - sx, dest.y - sy)
         var guardCounter = 0
         let guardLimit = 100_000   // never spin forever on a pathological input
 
-        while dist >= 1.0 && guardCounter < guardLimit {
-            guardCounter += 1
-            let wMag = min(W, dist)
+        for (i, dest) in waypoints.enumerated() {
+            // Hand over well outside the damping band on a via-point, so `M` never
+            // shrinks and no arrival cluster forms mid-move.
+            let arrival = (i == waypoints.count - 1) ? 1.0 : max(viaRadius, D + 4)
+            var dist = hypot(dest.x - sx, dest.y - sy)
 
-            if dist >= D {
-                wx = wx / sqrt3 + (2.0 * Double.random(in: 0..<1) - 1.0) * wMag / sqrt5
-                wy = wy / sqrt3 + (2.0 * Double.random(in: 0..<1) - 1.0) * wMag / sqrt5
-            } else {
-                wx /= sqrt3
-                wy /= sqrt3
-                if M < 3 {
-                    M = Double.random(in: 3...6)
+            while dist >= arrival && guardCounter < guardLimit {
+                guardCounter += 1
+                let wMag = min(W, dist)
+
+                if dist >= D {
+                    wx = wx / sqrt3 + (2.0 * Double.random(in: 0..<1) - 1.0) * wMag / sqrt5
+                    wy = wy / sqrt3 + (2.0 * Double.random(in: 0..<1) - 1.0) * wMag / sqrt5
                 } else {
-                    M /= sqrt5
+                    wx /= sqrt3
+                    wy /= sqrt3
+                    if M < 3 {
+                        M = Double.random(in: 3...6)
+                    } else {
+                        M /= sqrt5
+                    }
                 }
+
+                vx += wx + G * (dest.x - sx) / dist
+                vy += wy + G * (dest.y - sy) / dist
+
+                let vMag = hypot(vx, vy)
+                if vMag > M {
+                    // Clip to a RANDOM magnitude in [M/2, M] — the source of natural pace variation.
+                    let vClip = M / 2.0 + Double.random(in: 0..<1) * (M / 2.0)
+                    vx = (vx / vMag) * vClip
+                    vy = (vy / vMag) * vClip
+                }
+
+                sx += vx
+                sy += vy
+                points.append(CGPoint(x: sx, y: sy))
+                dist = hypot(dest.x - sx, dest.y - sy)
             }
-
-            vx += wx + G * (dest.x - sx) / dist
-            vy += wy + G * (dest.y - sy) / dist
-
-            let vMag = hypot(vx, vy)
-            if vMag > M {
-                // Clip to a RANDOM magnitude in [M/2, M] — the source of natural pace variation.
-                let vClip = M / 2.0 + Double.random(in: 0..<1) * (M / 2.0)
-                vx = (vx / vMag) * vClip
-                vy = (vy / vMag) * vClip
-            }
-
-            sx += vx
-            sy += vy
-            points.append(CGPoint(x: sx, y: sy))
-            dist = hypot(dest.x - sx, dest.y - sy)
         }
 
-        points.append(dest)
+        points.append(final)
         return points
     }
 
+    /// Single-destination WindMouse: the common case, and behaviourally identical to
+    /// the multi-waypoint version with one waypoint.
+    static func windMousePath(from start: CGPoint,
+                              to dest: CGPoint,
+                              gravity G: Double = 9,
+                              wind W: Double = 3,
+                              maxStep Mmax: Double = 15,
+                              dampDistance D: Double = 12) -> [CGPoint] {
+        windMousePath(from: start, through: [dest],
+                      gravity: G, wind: W, maxStep: Mmax, dampDistance: D)
+    }
+
     /// WindMouse with per-move randomized physics, so no two moves share the same
-    /// curvature/velocity signature.
+    /// curvature/velocity signature. One set of parameters covers the whole move,
+    /// waypoints included: a hand does not change character halfway through a gesture.
+    static func randomizedWindMousePath(from start: CGPoint, through waypoints: [CGPoint]) -> [CGPoint] {
+        let damp = Double.random(in: 10...16)
+        return windMousePath(from: start, through: waypoints,
+                             gravity: Double.random(in: 7...12),
+                             wind: Double.random(in: 2...5),
+                             maxStep: Double.random(in: 12...18),
+                             dampDistance: damp,
+                             viaRadius: damp + Double.random(in: 8...22))
+    }
+
     static func randomizedWindMousePath(from start: CGPoint, to dest: CGPoint) -> [CGPoint] {
-        windMousePath(from: start, to: dest,
-                      gravity: Double.random(in: 7...12),
-                      wind: Double.random(in: 2...5),
-                      maxStep: Double.random(in: 12...18),
-                      dampDistance: Double.random(in: 10...16))
+        randomizedWindMousePath(from: start, through: [dest])
     }
 
     /// Total arc length of a polyline.

@@ -21,6 +21,8 @@ final class Settings {
         static let clickZonesEnabled      = "clickZonesEnabled"
         static let clickProbability       = "clickProbability"
         static let clickZones             = "clickZones"
+        static let avoidZonesEnabled      = "avoidZonesEnabled"
+        static let avoidZones             = "avoidZones"
         static let idlePausesEnabled      = "idlePausesEnabled"
         static let longPausesEnabled      = "longPausesEnabled"
         static let longPauseMinSeconds    = "longPauseMinSeconds"
@@ -51,6 +53,7 @@ final class Settings {
             Key.scrollProbability:     0.25,   // chance of a scroll at a burst end
             Key.clickZonesEnabled:     true,   // act on user-defined click zones (if any)
             Key.clickProbability:      0.20,   // chance of a zone-click visit at a burst end
+            Key.avoidZonesEnabled:     true,   // honour user-defined no-go areas (if any)
             Key.idlePausesEnabled:     true,
             Key.longPausesEnabled:     false,   // opt-in: trades instant-active for realism
             Key.longPauseMinSeconds:   30.0,
@@ -143,18 +146,50 @@ final class Settings {
     }
 
     /// Load the user's click zones (CG global top-left rects). Empty if none/invalid.
-    func loadClickZones() -> [CGRect] {
-        guard let data = defaults.data(forKey: Key.clickZones),
-              let zones = try? JSONDecoder().decode([ClickZone].self, from: data)
+    func loadClickZones() -> [CGRect] { loadZones(forKey: Key.clickZones) }
+
+    /// Persist the user's click zones.
+    func saveClickZones(_ rects: [CGRect]) { saveZones(rects, forKey: Key.clickZones) }
+
+    // MARK: - Avoid zones (user-defined regions the cursor must never enter)
+
+    /// Whether to honour the user's no-go areas. Acts only if at least one area
+    /// exists; toggling off restores plain roaming without deleting the areas.
+    ///
+    /// With this off, or with no areas defined, every avoidance code path
+    /// short-circuits on an empty array and motion is exactly what it was before the
+    /// feature existed.
+    var avoidZonesEnabled: Bool {
+        get { defaults.bool(forKey: Key.avoidZonesEnabled) }
+        set { defaults.set(newValue, forKey: Key.avoidZonesEnabled) }
+    }
+
+    /// Load the user's no-go areas (CG global top-left rects). Empty if none/invalid.
+    func loadAvoidZones() -> [CGRect] { loadZones(forKey: Key.avoidZones) }
+
+    /// Persist the user's no-go areas.
+    func saveAvoidZones(_ rects: [CGRect]) { saveZones(rects, forKey: Key.avoidZones) }
+
+    /// Load/save for either zone list — both are stored the same way, as a JSON array
+    /// of `ZoneRect`.
+    func loadZones(_ kind: ZoneKind) -> [CGRect] {
+        kind == .click ? loadClickZones() : loadAvoidZones()
+    }
+
+    func saveZones(_ rects: [CGRect], _ kind: ZoneKind) {
+        if kind == .click { saveClickZones(rects) } else { saveAvoidZones(rects) }
+    }
+
+    private func loadZones(forKey key: String) -> [CGRect] {
+        guard let data = defaults.data(forKey: key),
+              let zones = try? JSONDecoder().decode([ZoneRect].self, from: data)
         else { return [] }
         return zones.map { $0.rect }
     }
 
-    /// Persist the user's click zones.
-    func saveClickZones(_ rects: [CGRect]) {
-        let zones = rects.map { ClickZone(rect: $0) }
-        if let data = try? JSONEncoder().encode(zones) {
-            defaults.set(data, forKey: Key.clickZones)
+    private func saveZones(_ rects: [CGRect], forKey key: String) {
+        if let data = try? JSONEncoder().encode(rects.map { ZoneRect(rect: $0) }) {
+            defaults.set(data, forKey: key)
         }
     }
 

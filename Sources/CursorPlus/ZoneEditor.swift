@@ -2,10 +2,24 @@ import AppKit
 import CoreGraphics
 
 /// Borderless full-screen overlay window that can become key (to receive Esc /
-/// Delete / Return). Spans the union of all displays.
+/// Delete / Return / Tab). Spans the union of all displays.
 final class OverlayWindow: NSWindow {
     override var canBecomeKey: Bool { true }
     override var canBecomeMain: Bool { true }
+}
+
+// MARK: - Look of each zone kind
+
+extension ZoneKind {
+    var tint: NSColor { self == .click ? .systemBlue : .systemRed }
+
+    var heading: String {
+        self == .click ? "Click areas: the cursor may click inside these"
+                       : "Avoid areas: the cursor never goes in these"
+    }
+
+    /// What the ⇥ hint offers to switch to.
+    var switchLabel: String { self == .click ? "avoid areas" : "click areas" }
 }
 
 // MARK: - Editor view
@@ -13,8 +27,13 @@ final class OverlayWindow: NSWindow {
 /// Interactive rectangle editor. Holds zones as view-local rects (top-left origin,
 /// `isFlipped = true`, so mouse math and drawing share one coordinate system).
 /// Drag empty space = create; click = select (8 resize handles appear); drag a
-/// handle = crop/resize; drag interior = move; Delete = remove; Esc/Return = close.
-final class ClickZoneEditorView: NSView {
+/// handle = crop/resize; drag interior = move; Delete = remove; Tab = switch which
+/// kind you are editing; Esc/Return = close.
+///
+/// The kind you are *not* editing is still drawn, dimmed and inert, because the two
+/// interact: a click area buried inside an avoid area will never be clicked, and you
+/// want to see that while you are drawing rather than wonder about it later.
+final class ZoneEditorView: NSView {
 
     enum Handle: CaseIterable {
         case topLeft, top, topRight, left, right, bottomLeft, bottom, bottomRight
@@ -36,9 +55,12 @@ final class ClickZoneEditorView: NSView {
     private enum DragMode { case none, creating, moving, resizing(Handle) }
 
     private(set) var rects: [CGRect] = []
+    private(set) var kind: ZoneKind = .click
+    private var backdrop: [CGRect] = []
     private var selected: Int?
 
     var onChange: (([CGRect]) -> Void)?
+    var onSwitchKind: (() -> Void)?
     var onClose: (() -> Void)?
 
     private let minSize: CGFloat = 10
@@ -54,7 +76,16 @@ final class ClickZoneEditorView: NSView {
     override var acceptsFirstResponder: Bool { true }
     override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
 
-    func setRects(_ r: [CGRect]) { rects = r; selected = nil; needsDisplay = true }
+    /// Load one kind for editing, with the other kind shown behind it for reference.
+    func load(kind: ZoneKind, rects: [CGRect], backdrop: [CGRect]) {
+        self.kind = kind
+        self.rects = rects
+        self.backdrop = backdrop
+        selected = nil
+        mode = .none
+        creating = .zero
+        needsDisplay = true
+    }
 
     // MARK: Hit testing (handles of selected first, then interiors top-most, then empty)
 
@@ -142,6 +173,8 @@ final class ClickZoneEditorView: NSView {
                 onChange?(rects)
                 needsDisplay = true
             }
+        case 48:                            // Tab -> edit the other kind
+            onSwitchKind?()
         case 53, 36, 76:                    // Esc / Return / Enter -> done
             onClose?()
         default:
@@ -190,21 +223,37 @@ final class ClickZoneEditorView: NSView {
         NSColor.black.withAlphaComponent(0.32).setFill()
         bounds.fill()
 
+        // The kind you are not editing, dimmed and inert, for context only.
+        let otherTint = kind.other.tint
+        for r in backdrop {
+            otherTint.withAlphaComponent(0.10).setFill()
+            r.fill()
+            let p = NSBezierPath(rect: r)
+            p.lineWidth = 1
+            p.setLineDash([5, 4], count: 2, phase: 0)
+            otherTint.withAlphaComponent(0.40).setStroke()
+            p.stroke()
+        }
+
         var live: [(CGRect, Bool)] = rects.enumerated().map { ($0.element, $0.offset == selected) }
         if case .creating = mode { live.append((creating, true)) }
 
+        let tint = kind.tint
         for (r, sel) in live {
-            (sel ? NSColor.systemBlue : NSColor.white).withAlphaComponent(sel ? 0.28 : 0.15).setFill()
+            tint.withAlphaComponent(sel ? 0.28 : 0.15).setFill()
             r.fill()
+            // Hatching reads as "keep out" at a glance, so an avoid area can never be
+            // mistaken for a click area even on a busy screen.
+            if kind == .avoid { hatch(r, color: tint.withAlphaComponent(sel ? 0.55 : 0.35)) }
             let path = NSBezierPath(rect: r)
             path.lineWidth = sel ? 2 : 1
-            (sel ? NSColor.systemBlue : NSColor.white).setStroke()
+            tint.setStroke()
             path.stroke()
         }
 
         if let i = selected, rects.indices.contains(i) {
             NSColor.white.setFill()
-            NSColor.systemBlue.setStroke()
+            tint.setStroke()
             for h in Handle.allCases {
                 let c = h.point(in: rects[i])
                 let sq = CGRect(x: c.x - handleSize / 2, y: c.y - handleSize / 2,
@@ -217,21 +266,50 @@ final class ClickZoneEditorView: NSView {
         drawHint()
     }
 
+    /// 45° stripes clipped to `r`.
+    private func hatch(_ r: CGRect, color: NSColor) {
+        guard r.width > 1, r.height > 1 else { return }
+        NSGraphicsContext.saveGraphicsState()
+        NSBezierPath(rect: r).setClip()
+        color.setStroke()
+        let path = NSBezierPath()
+        path.lineWidth = 1
+        var x = r.minX - r.height
+        while x < r.maxX {
+            path.move(to: CGPoint(x: x, y: r.maxY))
+            path.line(to: CGPoint(x: x + r.height, y: r.minY))
+            x += 10
+        }
+        path.stroke()
+        NSGraphicsContext.restoreGraphicsState()
+    }
+
     private func drawHint() {
-        let text = "Drag to add a click zone  •  click to select  •  drag handles to crop  •  ⌫ delete  •  esc/return done"
-        let attrs: [NSAttributedString.Key: Any] = [
-            .font: NSFont.systemFont(ofSize: 12, weight: .medium),
-            .foregroundColor: NSColor.white.withAlphaComponent(0.92),
-        ]
-        let str = NSAttributedString(string: text, attributes: attrs)
-        let size = str.size()
-        let pad: CGFloat = 8
+        let para = NSMutableParagraphStyle()
+        para.alignment = .center
+        para.lineSpacing = 2
+
+        let text = NSMutableAttributedString(
+            string: kind.heading + "\n",
+            attributes: [.font: NSFont.systemFont(ofSize: 13, weight: .semibold),
+                         .foregroundColor: kind.tint.blended(withFraction: 0.45, of: .white) ?? .white,
+                         .paragraphStyle: para])
+        text.append(NSAttributedString(
+            string: "drag to add  ·  click to select  ·  drag handles to crop  ·  ⌫ delete"
+                  + "  ·  ⇥ switch to \(kind.switchLabel)  ·  esc/return done",
+            attributes: [.font: NSFont.systemFont(ofSize: 12, weight: .medium),
+                         .foregroundColor: NSColor.white.withAlphaComponent(0.92),
+                         .paragraphStyle: para]))
+
+        let size = text.boundingRect(with: NSSize(width: bounds.width, height: .greatestFiniteMagnitude),
+                                     options: [.usesLineFragmentOrigin]).size
+        let pad: CGFloat = 10
         // Top of a flipped view is y = 0.
         let box = CGRect(x: bounds.midX - (size.width + pad * 2) / 2, y: 18,
                          width: size.width + pad * 2, height: size.height + pad * 2)
-        NSColor.black.withAlphaComponent(0.6).setFill()
-        NSBezierPath(roundedRect: box, xRadius: 6, yRadius: 6).fill()
-        str.draw(at: CGPoint(x: box.minX + pad, y: box.minY + pad))
+        NSColor.black.withAlphaComponent(0.62).setFill()
+        NSBezierPath(roundedRect: box, xRadius: 7, yRadius: 7).fill()
+        text.draw(with: box.insetBy(dx: pad, dy: pad), options: [.usesLineFragmentOrigin])
     }
 }
 
@@ -239,11 +317,14 @@ final class ClickZoneEditorView: NSView {
 
 /// Opens/closes the overlay editor and bridges its view-local rects to the CG
 /// global top-left zones persisted in Settings.
-final class ClickZoneEditorController {
+final class ZoneEditorController {
 
     private let settings: Settings
     private var window: OverlayWindow?
-    private var view: ClickZoneEditorView?
+    private var view: ZoneEditorView?
+
+    /// Which kind is currently being edited.
+    private(set) var kind: ZoneKind = .click
 
     /// Called after the editor closes (so the owner can clear its UI hold).
     var onClose: (() -> Void)?
@@ -254,8 +335,13 @@ final class ClickZoneEditorController {
 
     var isOpen: Bool { window != nil }
 
-    func open() {
-        if isOpen { window?.makeKeyAndOrderFront(nil); return }
+    func open(_ kind: ZoneKind) {
+        if isOpen {
+            if kind != self.kind { persist(); self.kind = kind; loadIntoView() }
+            window?.makeKeyAndOrderFront(nil)
+            return
+        }
+        self.kind = kind
 
         let frame = Self.unionScreenFrame()
         let win = OverlayWindow(contentRect: frame, styleMask: .borderless,
@@ -269,15 +355,16 @@ final class ClickZoneEditorController {
         win.collectionBehavior = [.canJoinAllSpaces, .stationary, .fullScreenAuxiliary]
         win.setFrame(frame, display: true)
 
-        let v = ClickZoneEditorView(frame: NSRect(origin: .zero, size: frame.size))
+        let v = ZoneEditorView(frame: NSRect(origin: .zero, size: frame.size))
         v.autoresizingMask = [.width, .height]
         win.contentView = v
         self.window = win
         self.view = v
 
         // Convert persisted CG zones -> view-local for display (window is positioned now).
-        v.setRects(settings.loadClickZones().map { cgToLocal($0) })
+        loadIntoView()
         v.onChange = { [weak self] _ in self?.persist() }
+        v.onSwitchKind = { [weak self] in self?.switchKind() }
         v.onClose = { [weak self] in self?.close() }
 
         NSApp.activate(ignoringOtherApps: true)
@@ -293,9 +380,23 @@ final class ClickZoneEditorController {
         onClose?()
     }
 
+    /// Save what is on screen, then flip to editing the other kind in place.
+    private func switchKind() {
+        persist()
+        kind = kind.other
+        loadIntoView()
+    }
+
+    private func loadIntoView() {
+        guard let v = view else { return }
+        v.load(kind: kind,
+               rects: settings.loadZones(kind).map { cgToLocal($0) },
+               backdrop: settings.loadZones(kind.other).map { cgToLocal($0) })
+    }
+
     private func persist() {
         guard let v = view else { return }
-        settings.saveClickZones(v.rects.map { localToCG($0) })
+        settings.saveZones(v.rects.map { localToCG($0) }, v.kind)
     }
 
     // MARK: Coordinate conversion (view-local <-> CG global top-left)
