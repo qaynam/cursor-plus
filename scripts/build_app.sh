@@ -68,7 +68,16 @@ fi
 
 if [[ -n "${IDENTITY}" ]]; then
     echo "==> Codesigning with stable identity"
-    codesign --force --identifier "${BUNDLE_ID}" --sign "${IDENTITY}" "${STAGED}"
+    # No silent ad-hoc fallback: that build would no longer match the permission
+    # grant, and the app would say it needs permission while Settings shows it on.
+    if ! codesign --force --identifier "${BUNDLE_ID}" --sign "${IDENTITY}" "${STAGED}"; then
+        echo ""
+        echo "codesign could not use the signing key. The first time, macOS asks whether"
+        echo "codesign may use it: run this script in a terminal you are watching, enter"
+        echo "your login password and choose \"Always Allow\". (errSecInternalComponent"
+        echo "means that prompt was denied or could not be shown.)"
+        exit 1
+    fi
 else
     echo "==> Codesigning ad-hoc (grant resets each rebuild; install 'CursorPlus Self' to avoid)"
     codesign --force --identifier "${BUNDLE_ID}" --sign - "${STAGED}"

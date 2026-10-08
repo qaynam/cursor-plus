@@ -95,7 +95,11 @@ macOS will ask for permission and deep link you to the right pane:
 
 **System Settings, Privacy and Security, Accessibility**, then turn on **Cursor+**.
 
-That one grant covers moving the cursor, scrolling, and watching for your input. If the menu says it needs permission or that the kill switch is unavailable, finish the grant and relaunch.
+That one grant covers moving the cursor, scrolling, and watching for your input. Auto-Start on Wi-Fi additionally needs Location access, only to read the network name.
+
+If anything is missing, the top line of the menu says so and is clickable: it lists what Cursor+ has and what it lacks, and opens the right pane in System Settings. **Permissions…** near the bottom of the menu shows the same list at any time.
+
+If Settings shows Cursor+ switched on but the menu still says it needs permission, that switch belongs to an earlier build: an ad-hoc signed rebuild counts as a different app. Choose **Reset and Ask Again** in that dialog, then switch the fresh entry on. Signing with a stable identity (see the top of [`scripts/build_app.sh`](scripts/build_app.sh)) stops this from happening on every rebuild.
 
 ## Using it
 

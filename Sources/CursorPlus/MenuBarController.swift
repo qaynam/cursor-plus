@@ -8,6 +8,8 @@ struct MenuState {
     let paused: Bool
     let ready: Bool
     let killSwitchArmed: Bool
+    /// Something blocks running; the status line then opens the permission help.
+    let needsPermissionFix: Bool
     let preventSleep: Bool
     let sleepWhenDisplayOff: Bool
     let launchAtLogin: Bool
@@ -170,8 +172,8 @@ final class MenuBarController: NSObject, NSMenuDelegate {
         menu.addItem(launchAtLoginItem)
 
         menu.addItem(.separator())
-        menu.addItem(makeItem("Open Accessibility Settings…", symbol: "lock.shield",
-                              #selector(AppController.openAccessibilitySettings)))
+        menu.addItem(makeItem("Permissions…", symbol: "lock.shield",
+                              #selector(AppController.showPermissionHelp)))
         menu.addItem(makeItem("Reset to Defaults", symbol: "arrow.counterclockwise",
                               #selector(AppController.resetDefaults)))
 
@@ -193,6 +195,11 @@ final class MenuBarController: NSObject, NSMenuDelegate {
 
         statusLine.title = state.statusText
         statusLine.image = Self.symbol(stateSymbol)
+        // Normally plain information; while a permission is missing it becomes the
+        // way to fix it, so the line that reports the problem is the one you click.
+        statusLine.isEnabled = state.needsPermissionFix
+        statusLine.action = state.needsPermissionFix ? #selector(AppController.showPermissionHelp) : nil
+        statusLine.target = controller
 
         toggleItem.title = state.toggleTitle
         toggleItem.image = Self.symbol(state.running ? "stop.fill" : "play.fill")
@@ -201,7 +208,7 @@ final class MenuBarController: NSObject, NSMenuDelegate {
 
         stopHintItem.title = state.killSwitchArmed
             ? "Press Esc three times to stop"
-            : "Stop gesture inactive: check Accessibility"
+            : "Stop gesture inactive"
         stopHintItem.image = Self.symbol(state.killSwitchArmed ? "escape" : "exclamationmark.triangle")
 
         Self.check(speedItems, selected: state.speedPresetTag)

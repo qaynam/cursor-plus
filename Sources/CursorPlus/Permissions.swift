@@ -58,11 +58,35 @@ enum Permissions {
     }
 
     /// Deep-link the user straight to Settings > Privacy & Security > Accessibility.
+    static func openAccessibilitySettings() { openPrivacyPane("Privacy_Accessibility") }
+
+    /// Settings > Privacy & Security > Input Monitoring, for when Accessibility is
+    /// granted but the Esc stop's key tap still can't be created.
+    static func openInputMonitoringSettings() { openPrivacyPane("Privacy_ListenEvent") }
+
     /// Tries the modern (macOS 13+) pane id first, falls back to the legacy scheme.
-    static func openAccessibilitySettings() {
-        let modern = "x-apple.systempreferences:com.apple.settings.PrivacySecurity.extension?Privacy_Accessibility"
-        let legacy = "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility"
+    private static func openPrivacyPane(_ anchor: String) {
+        let modern = "x-apple.systempreferences:com.apple.settings.PrivacySecurity.extension?\(anchor)"
+        let legacy = "x-apple.systempreferences:com.apple.preference.security?\(anchor)"
         if let url = URL(string: modern), NSWorkspace.shared.open(url) { return }
         if let url = URL(string: legacy) { NSWorkspace.shared.open(url) }
+    }
+
+    /// Forget this app's stored Accessibility decision, so the next request adds a
+    /// fresh entry. An ad-hoc signed rebuild leaves the old entry in the list,
+    /// switched on but bound to the previous build, which reads as "granted" in
+    /// Settings while the app is told it is not. False if the reset was refused.
+    static func resetAccessibilityGrant() -> Bool {
+        guard let bundleID = Bundle.main.bundleIdentifier else { return false }
+        let tccutil = Process()
+        tccutil.executableURL = URL(fileURLWithPath: "/usr/bin/tccutil")
+        tccutil.arguments = ["reset", "Accessibility", bundleID]
+        do {
+            try tccutil.run()
+            tccutil.waitUntilExit()
+        } catch {
+            return false
+        }
+        return tccutil.terminationStatus == 0
     }
 }

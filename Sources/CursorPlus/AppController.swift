@@ -218,16 +218,19 @@ final class AppController: NSObject, NSApplicationDelegate {
     // MARK: - On/off
 
     private func turnOn(byTrigger: Bool = false) {
+        // A start the user asked for explains what is missing and offers the fix; a
+        // trigger firing unattended only flags it on the (clickable) status line.
         guard Permissions.allReady else {
             Permissions.requestAll()
-            Permissions.openAccessibilitySettings()
             startPermissionPoll()
             refreshUI()
+            if !byTrigger { DispatchQueue.main.async { [weak self] in self?.showPermissionHelp() } }
             return
         }
         // HARD precondition: never move the cursor unless the kill switch is armed.
         guard armIfPossible() else {
-            refreshUI()   // status will show "kill switch unavailable"
+            refreshUI()   // status will show "Esc stop unavailable"
+            if !byTrigger { DispatchQueue.main.async { [weak self] in self?.showPermissionHelp() } }
             return
         }
         reconcilePowerAssertion(running: true)
@@ -387,8 +390,93 @@ final class AppController: NSObject, NSApplicationDelegate {
         zoneEditor.open(kind)
     }
 
-    @objc func openAccessibilitySettings() {
-        Permissions.openAccessibilitySettings()
+    // MARK: - Permission help
+
+    private var permissionAlertShowing = false
+
+    private enum PermissionFix { case accessibility, inputMonitoring, location, none }
+
+    /// What Cursor+ needs, which of it is missing, and a button straight to the pane
+    /// that fixes it. Reached from the status line while something is missing, from
+    /// Start, and from Permissions… in the menu.
+    @objc func showPermissionHelp() {
+        guard !permissionAlertShowing else { return }
+        permissionAlertShowing = true
+        defer { permissionAlertShowing = false }
+
+        let accessibilityOK = Permissions.allReady
+        let stopOK = killSwitch.isArmed
+        let locationNeeded = settings.networkTriggerEnabled
+        let locationOK = networkTrigger.locationAuthorized
+
+        var rows: [(ok: Bool, name: String, use: String)] = [
+            (accessibilityOK, "Accessibility", "moves the pointer and hears Esc Esc Esc. Required.")
+        ]
+        // Accessibility normally covers the key tap too; only list Input Monitoring
+        // when it demonstrably didn't.
+        if accessibilityOK && !stopOK {
+            rows.append((false, "Input Monitoring", "lets the Esc Esc Esc stop hear the keyboard."))
+        }
+        if locationNeeded {
+            rows.append((locationOK, "Location", "reads the Wi-Fi name for Auto-Start on Wi-Fi. Your location is not used."))
+        }
+
+        let fix: PermissionFix = !accessibilityOK ? .accessibility
+            : !stopOK ? .inputMonitoring
+            : (locationNeeded && !locationOK) ? .location
+            : .none
+
+        let alert = NSAlert()
+        var info = rows.map { "\($0.ok ? "✓" : "✗")  \($0.name): \($0.use)" }.joined(separator: "\n")
+        switch fix {
+        case .accessibility:
+            alert.messageText = "Cursor+ needs Accessibility access"
+            info += "\n\nTurn on Cursor+ in Privacy & Security › Accessibility. If it is already "
+                  + "listed and switched on, that switch belongs to an earlier build: remove it "
+                  + "with −, then add it again, or choose Reset and Ask Again."
+            alert.addButton(withTitle: "Open Accessibility Settings")
+            alert.addButton(withTitle: "Reset and Ask Again")
+            alert.addButton(withTitle: "Cancel")
+        case .inputMonitoring:
+            alert.messageText = "The Esc stop can't hear the keyboard"
+            info += "\n\nTurn on Cursor+ in Privacy & Security › Input Monitoring. "
+                  + "Cursor+ won't move the pointer until the stop gesture works."
+            alert.addButton(withTitle: "Open Input Monitoring Settings")
+            alert.addButton(withTitle: "Cancel")
+        case .location:
+            alert.messageText = "Auto-Start on Wi-Fi needs Location access"
+            info += "\n\nmacOS only tells apps the Wi-Fi name when they have Location access."
+            alert.addButton(withTitle: networkTrigger.locationDenied ? "Open Location Settings"
+                                                                     : "Allow Location Access")
+            alert.addButton(withTitle: "Cancel")
+        case .none:
+            alert.messageText = "Cursor+ has everything it needs"
+            alert.addButton(withTitle: "OK")
+        }
+        alert.informativeText = info
+        alert.alertStyle = fix == .none ? .informational : .warning
+
+        NSApp.activate(ignoringOtherApps: true)
+        let response = alert.runModal()
+
+        switch (fix, response) {
+        case (.accessibility, .alertFirstButtonReturn):
+            Permissions.openAccessibilitySettings()
+        case (.accessibility, .alertSecondButtonReturn):
+            // Drop the stale entry, then ask again so a fresh one (bound to this
+            // build) appears in the list, ready to switch on.
+            if Permissions.resetAccessibilityGrant() { Permissions.requestAccessibility() }
+            Permissions.openAccessibilitySettings()
+        case (.inputMonitoring, .alertFirstButtonReturn):
+            Permissions.requestListenEvents()
+            Permissions.openInputMonitoringSettings()
+        case (.location, .alertFirstButtonReturn):
+            networkTrigger.requestLocationAccess()
+        default:
+            break
+        }
+        if fix == .accessibility || fix == .inputMonitoring { startPermissionPoll() }
+        refreshUI()
     }
 
     @objc func resetDefaults() {
@@ -597,9 +685,9 @@ final class AppController: NSObject, NSApplicationDelegate {
 
         let status: String
         if !ready {
-            status = "Cursor+: needs permission"
+            status = "Cursor+: needs permission · Fix…"
         } else if !armed {
-            status = "Cursor+: kill switch unavailable"
+            status = "Cursor+: Esc stop unavailable · Fix…"
         } else if running && (displayAsleep || systemSleeping) {
             status = "Cursor+: paused (display off)"
         } else if running && secure {
@@ -625,6 +713,7 @@ final class AppController: NSObject, NSApplicationDelegate {
             paused: paused,
             ready: ready,
             killSwitchArmed: armed,
+            needsPermissionFix: !ready || !armed,
             preventSleep: settings.preventDisplaySleep,
             sleepWhenDisplayOff: settings.sleepWhenDisplayOff,
             launchAtLogin: launchAtLogin,
