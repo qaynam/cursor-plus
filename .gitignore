@@ -2,8 +2,18 @@
 .build/
 .swiftpm/
 
-# Built app bundle (produced by scripts/build_app.sh)
-Cursor+.app/
+# Built app bundles (scripts/build_app.sh stages under .build/ and installs to
+# /Applications; this only catches a stray manual copy)
+*.app/
+
+# Local signing setup: never commit an identity, key or certificate
+scripts/local.env
+*.p12
+*.cer
+*.pem
+*.key
+*.mobileprovision
+*.provisionprofile
 
 # macOS
 .DS_Store
