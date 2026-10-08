@@ -17,6 +17,10 @@ private let intervalPresets: [(Double, Double)] = [
     (10, 20), (20, 40), (30, 60), (60, 120)
 ]
 
+/// Start-after-idle presets (seconds): how long the mouse and keyboard must sit
+/// untouched before motion starts, or resumes after you used them.
+private let idleDelayPresets: [Double] = [3, 60, 120, 300, 600, 900, 1800]
+
 /// Central coordinator: owns every subsystem, enforces the permission gate, and
 /// exposes the menu actions. Lives for the whole app lifetime.
 final class AppController: NSObject, NSApplicationDelegate {
@@ -320,6 +324,13 @@ final class AppController: NSObject, NSApplicationDelegate {
         refreshUI()
     }
 
+    @objc func setIdleDelayPreset(_ sender: NSMenuItem) {
+        let tag = sender.tag
+        guard idleDelayPresets.indices.contains(tag) else { return }
+        settings.autoPauseCooldownSeconds = idleDelayPresets[tag]
+        refreshUI()
+    }
+
     @objc func togglePreventSleep() {
         settings.preventDisplaySleep.toggle()
         reconcilePowerAssertion(running: stateMachine.isOn)
@@ -383,6 +394,7 @@ final class AppController: NSObject, NSApplicationDelegate {
     @objc func resetDefaults() {
         setSpeedPreset(menuItem(tag: 1))     // Balanced
         setIntervalPreset(menuItem(tag: 0))  // 10–20s
+        setIdleDelayPreset(menuItem(tag: 0)) // 3 seconds
         settings.preventDisplaySleep = true
         settings.scrollEnabled = true
         settings.idlePausesEnabled = true
@@ -566,6 +578,15 @@ final class AppController: NSObject, NSApplicationDelegate {
         } ?? -1
     }
 
+    private func currentIdleDelayPresetTag() -> Int {
+        idleDelayPresets.firstIndex { abs($0 - settings.autoPauseCooldownSeconds) < 0.0001 } ?? -1
+    }
+
+    /// "5 min" / "30 s", for the status line.
+    private static func idleDelayLabel(_ seconds: Double) -> String {
+        seconds >= 60 ? "\(Int(seconds / 60)) min" : "\(Int(seconds)) s"
+    }
+
     private func refreshUI() {
         let ready = Permissions.allReady
         let armed = killSwitch.isArmed
@@ -583,6 +604,8 @@ final class AppController: NSObject, NSApplicationDelegate {
             status = "Cursor+: paused (display off)"
         } else if running && secure {
             status = "Cursor+: paused (secure input)"
+        } else if running && paused && settings.autoPauseCooldownSeconds >= 60 {
+            status = "Cursor+: waiting · moves after \(Self.idleDelayLabel(settings.autoPauseCooldownSeconds)) idle"
         } else if running && paused {
             status = "Cursor+: paused (you're active)"
         } else if running && resting {
@@ -617,7 +640,8 @@ final class AppController: NSObject, NSApplicationDelegate {
             avoidZonesEnabled: settings.avoidZonesEnabled,
             avoidZoneCount: settings.loadAvoidZones().count,
             speedPresetTag: currentSpeedPresetTag(),
-            intervalPresetTag: currentIntervalPresetTag()
+            intervalPresetTag: currentIntervalPresetTag(),
+            idleDelayPresetTag: currentIdleDelayPresetTag()
         ))
     }
 }

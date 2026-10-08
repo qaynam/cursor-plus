@@ -128,7 +128,7 @@ final class StateMachine {
         guard !isOn else { return }
         isOn = true
         isPaused = false
-        autoPause.reset()
+        autoPause.seedFromSystemIdle()                  // honour the idle delay from the start
         input.reset()                                   // reseed deltas, clear stale log
         currentPoint = InputEngine.currentLocation()
         beginBurst()

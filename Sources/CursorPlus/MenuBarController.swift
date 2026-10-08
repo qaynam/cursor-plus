@@ -24,10 +24,18 @@ struct MenuState {
     let avoidZoneCount: Int
     let speedPresetTag: Int      // -1 = custom
     let intervalPresetTag: Int   // -1 = custom
+    let idleDelayPresetTag: Int  // -1 = custom
 }
 
 /// Owns the menu-bar `NSStatusItem` and its menu. Menu items target the
 /// `AppController` (an NSObject) via selectors — the standard AppKit pattern.
+///
+/// Laid out along the macOS menu guidelines: the live status and the one action
+/// people open the menu for (Start/Stop) come first; settings are grouped under
+/// section headers; rarely used sets (area editing, the Wi-Fi list) sit one submenu
+/// down and never deeper; titles use title-style capitalization, with an ellipsis
+/// only where a further step follows; and every actionable item carries an SF
+/// Symbol, so a group reads at a glance and its titles line up.
 final class MenuBarController: NSObject, NSMenuDelegate {
 
     private var statusItem: NSStatusItem!
@@ -35,38 +43,48 @@ final class MenuBarController: NSObject, NSMenuDelegate {
 
     private var statusLine: NSMenuItem!
     private var toggleItem: NSMenuItem!
-    private var preventSleepItem: NSMenuItem!
-    private var sleepOnDisplayOffItem: NSMenuItem!
-    private var launchAtLoginItem: NSMenuItem!
-    private var triggerParent: NSMenuItem!
-    private var triggerMenu: NSMenu!
-    private var lastState: MenuState?
+    private var stopHintItem: NSMenuItem!
+
+    private var speedItems: [NSMenuItem] = []
+    private var intervalItems: [NSMenuItem] = []
     private var scrollItem: NSMenuItem!
     private var idlePausesItem: NSMenuItem!
     private var longPausesItem: NSMenuItem!
-    private var clickZonesItem: NSMenuItem!
-    private var editZonesItem: NSMenuItem!
-    private var clearZonesItem: NSMenuItem!
-    private var avoidZonesItem: NSMenuItem!
+
+    private var clickToggleItem: NSMenuItem!
+    private var editClickItem: NSMenuItem!
+    private var clearClickItem: NSMenuItem!
+    private var avoidToggleItem: NSMenuItem!
     private var editAvoidItem: NSMenuItem!
     private var clearAvoidItem: NSMenuItem!
-    private var speedItems: [NSMenuItem] = []
-    private var intervalItems: [NSMenuItem] = []
-    private var stopHintItem: NSMenuItem!
+
+    private var preventSleepItem: NSMenuItem!
+    private var sleepOnDisplayOffItem: NSMenuItem!
+
+    private var idleDelayItems: [NSMenuItem] = []
+    private var triggerParent: NSMenuItem!
+    private var triggerMenu: NSMenu!
+    private var launchAtLoginItem: NSMenuItem!
+
+    private var lastState: MenuState?
 
     static let speedPresetNames = ["Calm", "Balanced", "Lively", "Wild"]
     static let intervalPresetNames = ["10–20s", "20–40s", "30–60s", "60–120s"]
+    static let idleDelayPresetNames = ["3 Seconds", "1 Minute", "2 Minutes", "5 Minutes",
+                                       "10 Minutes", "15 Minutes", "30 Minutes"]
+
+    /// One gauge per speed preset, filling up from Calm to Wild.
+    private static let speedPresetSymbols = ["gauge.with.dots.needle.0percent",
+                                             "gauge.with.dots.needle.33percent",
+                                             "gauge.with.dots.needle.67percent",
+                                             "gauge.with.dots.needle.100percent"]
 
     // The most human-like / least-detectable option in each submenu — the one to
-    // leave selected the majority of the time. Marked with a ★ in the menu.
+    // leave selected the majority of the time. Marked "Recommended" in the menu.
     // Balanced = natural speed spread centered on normal; 10–20s = frequent, human
     // burst/pause rhythm (longer bursts move continuously too long to look human).
     private static let recommendedSpeedIndex = 1     // Balanced
     private static let recommendedIntervalIndex = 0  // 10–20s
-
-    private static func label(_ name: String, recommended: Bool) -> String {
-        recommended ? "\(name)  ★" : name
-    }
 
     func install(controller: AppController) {
         self.controller = controller
@@ -78,164 +96,87 @@ final class MenuBarController: NSObject, NSMenuDelegate {
         let menu = NSMenu()
         menu.autoenablesItems = false
 
-        statusLine = NSMenuItem(title: "Cursor+", action: nil, keyEquivalent: "")
-        statusLine.isEnabled = false
+        // Status and the main action.
+        statusLine = infoItem("Cursor+", symbol: "cursorarrow")
         menu.addItem(statusLine)
-
         menu.addItem(.separator())
-
-        toggleItem = NSMenuItem(title: "Start",
-                                action: #selector(AppController.toggleRunning),
-                                keyEquivalent: "")
-        toggleItem.target = controller
+        toggleItem = makeItem("Start", symbol: "play.fill", #selector(AppController.toggleRunning))
         menu.addItem(toggleItem)
+        stopHintItem = infoItem("Press Esc three times to stop", symbol: "escape")
+        menu.addItem(stopHintItem)
 
-        menu.addItem(.separator())
-
-        // Motion speed submenu
-        let speedMenu = NSMenu()
-        for (i, name) in Self.speedPresetNames.enumerated() {
-            let it = NSMenuItem(title: Self.label(name, recommended: i == Self.recommendedSpeedIndex),
-                                action: #selector(AppController.setSpeedPreset(_:)),
-                                keyEquivalent: "")
-            it.tag = i
-            it.target = controller
-            speedMenu.addItem(it)
-            speedItems.append(it)
-        }
-        let speedParent = NSMenuItem(title: "Motion speed", action: nil, keyEquivalent: "")
-        speedParent.submenu = speedMenu
-        menu.addItem(speedParent)
-
-        // Wander-interval submenu (how long the cursor roams between rests)
-        let intervalMenu = NSMenu()
-        for (i, name) in Self.intervalPresetNames.enumerated() {
-            let it = NSMenuItem(title: Self.label(name, recommended: i == Self.recommendedIntervalIndex),
-                                action: #selector(AppController.setIntervalPreset(_:)),
-                                keyEquivalent: "")
-            it.tag = i
-            it.target = controller
-            intervalMenu.addItem(it)
-            intervalItems.append(it)
-        }
-        let intervalParent = NSMenuItem(title: "Wander interval", action: nil, keyEquivalent: "")
-        intervalParent.submenu = intervalMenu
-        menu.addItem(intervalParent)
-
-        menu.addItem(.separator())
-
-        scrollItem = NSMenuItem(title: "Occasional scrolling",
-                                action: #selector(AppController.toggleScrolling),
-                                keyEquivalent: "")
-        scrollItem.target = controller
+        addSection("Motion", to: menu)
+        speedItems = presetItems(Self.speedPresetNames, symbols: Self.speedPresetSymbols,
+                                 recommended: Self.recommendedSpeedIndex,
+                                 #selector(AppController.setSpeedPreset(_:)))
+        menu.addItem(submenuItem("Motion Speed", symbol: "speedometer", items: speedItems))
+        intervalItems = presetItems(Self.intervalPresetNames,
+                                    recommended: Self.recommendedIntervalIndex,
+                                    #selector(AppController.setIntervalPreset(_:)))
+        menu.addItem(submenuItem("Wander Interval", symbol: "timer", items: intervalItems))
+        scrollItem = makeItem("Occasional Scrolling", symbol: "arrow.up.and.down",
+                              #selector(AppController.toggleScrolling))
         menu.addItem(scrollItem)
-
-        idlePausesItem = NSMenuItem(title: "Human idle pauses",
-                                    action: #selector(AppController.toggleIdlePauses),
-                                    keyEquivalent: "")
-        idlePausesItem.target = controller
+        idlePausesItem = makeItem("Human Idle Pauses", symbol: "pause",
+                                  #selector(AppController.toggleIdlePauses))
         menu.addItem(idlePausesItem)
-
-        longPausesItem = NSMenuItem(title: "Occasional long pauses",
-                                    action: #selector(AppController.toggleLongPauses),
-                                    keyEquivalent: "")
-        longPausesItem.target = controller
+        longPausesItem = makeItem("Occasional Long Pauses", symbol: "hourglass",
+                                  #selector(AppController.toggleLongPauses))
         menu.addItem(longPausesItem)
 
-        preventSleepItem = NSMenuItem(title: "Prevent display sleep",
-                                      action: #selector(AppController.togglePreventSleep),
-                                      keyEquivalent: "")
-        preventSleepItem.target = controller
-        menu.addItem(preventSleepItem)
+        // Areas: drawn once, revisited rarely, so each kind gets one submenu.
+        addSection("Areas", to: menu)
+        clickToggleItem = makeItem("Click Inside Click Areas", symbol: "cursorarrow.click",
+                                   #selector(AppController.toggleClickZones))
+        editClickItem = makeItem("Edit Click Areas…", symbol: "pencil",
+                                 #selector(AppController.editClickAreas))
+        clearClickItem = makeItem("Remove All Click Areas", symbol: "trash",
+                                  #selector(AppController.clearClickAreas))
+        menu.addItem(submenuItem("Click Areas", symbol: "cursorarrow.click.2",
+                                 items: [clickToggleItem, editClickItem, .separator(), clearClickItem]))
+        avoidToggleItem = makeItem("Keep Out of Avoid Areas", symbol: "hand.raised",
+                                   #selector(AppController.toggleAvoidZones))
+        editAvoidItem = makeItem("Edit Avoid Areas…", symbol: "pencil",
+                                 #selector(AppController.editAvoidAreas))
+        clearAvoidItem = makeItem("Remove All Avoid Areas", symbol: "trash",
+                                  #selector(AppController.clearAvoidAreas))
+        menu.addItem(submenuItem("Avoid Areas", symbol: "nosign",
+                                 items: [avoidToggleItem, editAvoidItem, .separator(), clearAvoidItem]))
 
-        sleepOnDisplayOffItem = NSMenuItem(title: "Sleep Mac when display turns off",
-                                           action: #selector(AppController.toggleSleepWhenDisplayOff),
-                                           keyEquivalent: "")
-        sleepOnDisplayOffItem.target = controller
+        addSection("Display & Sleep", to: menu)
+        preventSleepItem = makeItem("Prevent Display Sleep", symbol: "display",
+                                    #selector(AppController.togglePreventSleep))
+        menu.addItem(preventSleepItem)
+        sleepOnDisplayOffItem = makeItem("Sleep Mac When Display Turns Off", symbol: "moon.zzz",
+                                         #selector(AppController.toggleSleepWhenDisplayOff))
         menu.addItem(sleepOnDisplayOffItem)
 
-        // Wi-Fi trigger: rebuilt each time it opens, since the saved list and the
-        // current network both change underneath it.
+        addSection("Automation", to: menu)
+        idleDelayItems = presetItems(Self.idleDelayPresetNames,
+                                     #selector(AppController.setIdleDelayPreset(_:)))
+        menu.addItem(submenuItem("Start After Idle", symbol: "clock", items: idleDelayItems,
+                                 header: "Move once you've been idle for"))
+        // Rebuilt each time it opens, since the saved list and the current network
+        // both change underneath it.
         triggerMenu = NSMenu()
         triggerMenu.autoenablesItems = false
         triggerMenu.delegate = self
-        triggerParent = NSMenuItem(title: "Auto-start on Wi-Fi", action: nil, keyEquivalent: "")
+        triggerParent = NSMenuItem(title: "Auto-Start on Wi-Fi", action: nil, keyEquivalent: "")
+        triggerParent.image = Self.symbol("wifi")
         triggerParent.submenu = triggerMenu
         menu.addItem(triggerParent)
-
-        menu.addItem(.separator())
-
-        // Click zones: occasionally click inside user-defined regions.
-        clickZonesItem = NSMenuItem(title: "Click defined areas",
-                                    action: #selector(AppController.toggleClickZones),
-                                    keyEquivalent: "")
-        clickZonesItem.target = controller
-        menu.addItem(clickZonesItem)
-
-        editZonesItem = NSMenuItem(title: "Edit click areas…",
-                                   action: #selector(AppController.editClickAreas),
-                                   keyEquivalent: "")
-        editZonesItem.target = controller
-        menu.addItem(editZonesItem)
-
-        clearZonesItem = NSMenuItem(title: "Clear click areas",
-                                    action: #selector(AppController.clearClickAreas),
-                                    keyEquivalent: "")
-        clearZonesItem.target = controller
-        menu.addItem(clearZonesItem)
-
-        menu.addItem(.separator())
-
-        // Avoid areas: regions the cursor is never allowed to enter or aim at.
-        avoidZonesItem = NSMenuItem(title: "Avoid defined areas",
-                                    action: #selector(AppController.toggleAvoidZones),
-                                    keyEquivalent: "")
-        avoidZonesItem.target = controller
-        menu.addItem(avoidZonesItem)
-
-        editAvoidItem = NSMenuItem(title: "Edit avoid areas…",
-                                   action: #selector(AppController.editAvoidAreas),
-                                   keyEquivalent: "")
-        editAvoidItem.target = controller
-        menu.addItem(editAvoidItem)
-
-        clearAvoidItem = NSMenuItem(title: "Clear avoid areas",
-                                    action: #selector(AppController.clearAvoidAreas),
-                                    keyEquivalent: "")
-        clearAvoidItem.target = controller
-        menu.addItem(clearAvoidItem)
-
-        menu.addItem(.separator())
-
-        let permItem = NSMenuItem(title: "Open Accessibility Settings…",
-                                  action: #selector(AppController.openAccessibilitySettings),
-                                  keyEquivalent: "")
-        permItem.target = controller
-        menu.addItem(permItem)
-
-        launchAtLoginItem = NSMenuItem(title: "Open at login",
-                                       action: #selector(AppController.toggleLaunchAtLogin),
-                                       keyEquivalent: "")
-        launchAtLoginItem.target = controller
+        launchAtLoginItem = makeItem("Open at Login", symbol: "person.crop.circle",
+                                     #selector(AppController.toggleLaunchAtLogin))
         menu.addItem(launchAtLoginItem)
 
-        let resetItem = NSMenuItem(title: "Reset to defaults",
-                                   action: #selector(AppController.resetDefaults),
-                                   keyEquivalent: "")
-        resetItem.target = controller
-        menu.addItem(resetItem)
+        menu.addItem(.separator())
+        menu.addItem(makeItem("Open Accessibility Settings…", symbol: "lock.shield",
+                              #selector(AppController.openAccessibilitySettings)))
+        menu.addItem(makeItem("Reset to Defaults", symbol: "arrow.counterclockwise",
+                              #selector(AppController.resetDefaults)))
 
         menu.addItem(.separator())
-
-        stopHintItem = NSMenuItem(title: "Stop with: Esc Esc Esc", action: nil, keyEquivalent: "")
-        stopHintItem.isEnabled = false
-        menu.addItem(stopHintItem)
-
-        let quitItem = NSMenuItem(title: "Quit Cursor+",
-                                  action: #selector(AppController.quit),
-                                  keyEquivalent: "q")
-        quitItem.target = controller
-        menu.addItem(quitItem)
+        menu.addItem(makeItem("Quit Cursor+", symbol: "power", #selector(AppController.quit), key: "q"))
 
         statusItem.menu = menu
     }
@@ -248,55 +189,53 @@ final class MenuBarController: NSObject, NSMenuDelegate {
 
     func refresh(_ state: MenuState) {
         lastState = state
+        let stateSymbol = Self.stateSymbol(state)
+
         statusLine.title = state.statusText
+        statusLine.image = Self.symbol(stateSymbol)
+
         toggleItem.title = state.toggleTitle
+        toggleItem.image = Self.symbol(state.running ? "stop.fill" : "play.fill")
         // Only allow starting when the kill switch is actually live (or to stop).
         toggleItem.isEnabled = state.running || (state.ready && state.killSwitchArmed)
 
         stopHintItem.title = state.killSwitchArmed
-            ? "Stop with: Esc Esc Esc"
-            : "Stop gesture INACTIVE — grant Input Monitoring"
+            ? "Press Esc three times to stop"
+            : "Stop gesture inactive: check Accessibility"
+        stopHintItem.image = Self.symbol(state.killSwitchArmed ? "escape" : "exclamationmark.triangle")
 
-        preventSleepItem.state = state.preventSleep ? .on : .off
-        sleepOnDisplayOffItem.state = state.sleepWhenDisplayOff ? .on : .off
-        launchAtLoginItem.state = state.launchAtLogin ? .on : .off
-        triggerParent.state = state.triggerEnabled ? .on : .off
+        Self.check(speedItems, selected: state.speedPresetTag)
+        Self.check(intervalItems, selected: state.intervalPresetTag)
         scrollItem.state = state.scrollEnabled ? .on : .off
         idlePausesItem.state = state.idlePausesEnabled ? .on : .off
         longPausesItem.state = state.longPausesEnabled ? .on : .off
-        clickZonesItem.state = state.clickZonesEnabled ? .on : .off
-        clickZonesItem.isEnabled = state.clickZoneCount > 0   // nothing to act on with no zones
-        editZonesItem.title = state.clickZoneCount > 0
-            ? "Edit click areas (\(state.clickZoneCount))…"
-            : "Add a click area…"
-        clearZonesItem.isEnabled = state.clickZoneCount > 0
 
-        avoidZonesItem.state = state.avoidZonesEnabled ? .on : .off
-        avoidZonesItem.isEnabled = state.avoidZoneCount > 0   // nothing to avoid with no areas
-        editAvoidItem.title = state.avoidZoneCount > 0
-            ? "Edit avoid areas (\(state.avoidZoneCount))…"
-            : "Add an avoid area…"
-        clearAvoidItem.isEnabled = state.avoidZoneCount > 0
+        refreshAreaItems(toggle: clickToggleItem, edit: editClickItem, clear: clearClickItem,
+                         enabled: state.clickZonesEnabled, count: state.clickZoneCount,
+                         noun: "Click Area")
+        refreshAreaItems(toggle: avoidToggleItem, edit: editAvoidItem, clear: clearAvoidItem,
+                         enabled: state.avoidZonesEnabled, count: state.avoidZoneCount,
+                         noun: "Avoid Area")
 
-        for (i, item) in speedItems.enumerated() {
-            item.state = (i == state.speedPresetTag) ? .on : .off
-        }
-        for (i, item) in intervalItems.enumerated() {
-            item.state = (i == state.intervalPresetTag) ? .on : .off
-        }
+        preventSleepItem.state = state.preventSleep ? .on : .off
+        sleepOnDisplayOffItem.state = state.sleepWhenDisplayOff ? .on : .off
 
-        let symbol: String
-        if !state.ready {
-            symbol = "exclamationmark.triangle"
-        } else if state.paused {
-            symbol = "pause.circle"
-        } else if state.running {
-            symbol = "cursorarrow.motionlines"
-        } else {
-            symbol = "cursorarrow"
-        }
-        statusItem.button?.image = NSImage(systemSymbolName: symbol,
+        Self.check(idleDelayItems, selected: state.idleDelayPresetTag)
+        triggerParent.state = state.triggerEnabled ? .on : .off
+        launchAtLoginItem.state = state.launchAtLogin ? .on : .off
+
+        statusItem.button?.image = NSImage(systemSymbolName: stateSymbol,
                                            accessibilityDescription: "Cursor+")
+    }
+
+    /// The toggle does nothing with no areas drawn, and Edit becomes Add.
+    private func refreshAreaItems(toggle: NSMenuItem, edit: NSMenuItem, clear: NSMenuItem,
+                                  enabled: Bool, count: Int, noun: String) {
+        toggle.state = enabled ? .on : .off
+        toggle.isEnabled = count > 0
+        edit.title = count > 0 ? "Edit \(noun)s (\(count))…" : "Add a \(noun)…"
+        edit.image = Self.symbol(count > 0 ? "pencil" : "plus")
+        clear.isEnabled = count > 0
     }
 
     // MARK: - Wi-Fi trigger submenu
@@ -307,58 +246,113 @@ final class MenuBarController: NSObject, NSMenuDelegate {
         guard let state = lastState else { return }
         menu.removeAllItems()
 
-        let enable = NSMenuItem(title: "Start automatically on these networks",
-                                action: #selector(AppController.toggleNetworkTrigger),
-                                keyEquivalent: "")
-        enable.target = controller
+        let enable = makeItem("Start on Saved Networks", symbol: "wifi",
+                              #selector(AppController.toggleNetworkTrigger))
         enable.state = state.triggerEnabled ? .on : .off
         menu.addItem(enable)
 
-        menu.addItem(.separator())
-
+        addSection("Current Network", to: menu)
         if !state.locationAuthorized {
-            let why = NSMenuItem(title: "macOS shows the Wi-Fi name only with Location access",
-                                 action: nil, keyEquivalent: "")
-            why.isEnabled = false
-            menu.addItem(why)
-            let allow = NSMenuItem(title: "Allow Location access…",
-                                   action: #selector(AppController.requestLocationAccess),
-                                   keyEquivalent: "")
-            allow.target = controller
-            menu.addItem(allow)
+            menu.addItem(infoItem("Wi-Fi name needs Location access", symbol: "location.slash"))
+            menu.addItem(makeItem("Allow Location Access…", symbol: "location",
+                                  #selector(AppController.requestLocationAccess)))
         } else if let ssid = state.currentSSID {
-            let now = NSMenuItem(title: "Now on: \(ssid)", action: nil, keyEquivalent: "")
-            now.isEnabled = false
-            menu.addItem(now)
-            let add = NSMenuItem(title: "Add “\(ssid)”",
-                                 action: #selector(AppController.addCurrentNetwork),
-                                 keyEquivalent: "")
-            add.target = controller
-            add.isEnabled = !state.triggerSSIDs.contains(ssid)
+            menu.addItem(infoItem(ssid, symbol: "wifi"))
+            let saved = state.triggerSSIDs.contains(ssid)
+            let add = makeItem(saved ? "Already Saved" : "Add to Saved Networks",
+                               symbol: saved ? "checkmark.circle" : "plus.circle",
+                               #selector(AppController.addCurrentNetwork))
+            add.isEnabled = !saved
             menu.addItem(add)
         } else {
-            let none = NSMenuItem(title: "Not on Wi-Fi", action: nil, keyEquivalent: "")
-            none.isEnabled = false
-            menu.addItem(none)
+            menu.addItem(infoItem("Not on Wi-Fi", symbol: "wifi.slash"))
         }
 
-        menu.addItem(.separator())
-
-        let header = NSMenuItem(title: state.triggerSSIDs.isEmpty
-                                    ? "No saved networks"
-                                    : "Saved networks (click to remove)",
-                                action: nil, keyEquivalent: "")
-        header.isEnabled = false
-        menu.addItem(header)
+        addSection("Saved Networks", to: menu)
+        if state.triggerSSIDs.isEmpty {
+            menu.addItem(infoItem("None", symbol: "tray"))
+        }
         for ssid in state.triggerSSIDs {
-            let it = NSMenuItem(title: ssid,
-                                action: #selector(AppController.removeTriggerNetwork(_:)),
-                                keyEquivalent: "")
-            it.target = controller
+            let it = makeItem("Remove “\(ssid)”", symbol: "minus.circle",
+                              #selector(AppController.removeTriggerNetwork(_:)))
             it.representedObject = ssid
-            it.state = (ssid == state.currentSSID) ? .on : .off   // ✓ = the one you're on
-            it.indentationLevel = 1
             menu.addItem(it)
         }
+    }
+
+    // MARK: - Building blocks
+
+    /// An item that sends `action` to the controller.
+    private func makeItem(_ title: String, symbol: String?, _ action: Selector, key: String = "") -> NSMenuItem {
+        let it = NSMenuItem(title: title, action: action, keyEquivalent: key)
+        it.target = controller
+        it.image = symbol.flatMap(Self.symbol)
+        return it
+    }
+
+    /// A line of information: status, a hint, the network you're on.
+    private func infoItem(_ title: String, symbol: String?) -> NSMenuItem {
+        let it = NSMenuItem(title: title, action: nil, keyEquivalent: "")
+        it.image = symbol.flatMap(Self.symbol)
+        it.isEnabled = false
+        return it
+    }
+
+    private func submenuItem(_ title: String, symbol: String, items: [NSMenuItem],
+                             header: String? = nil) -> NSMenuItem {
+        let sub = NSMenu()
+        sub.autoenablesItems = false
+        if let header { sub.addItem(.sectionHeader(title: header)) }
+        for item in items { sub.addItem(item) }
+        let parent = NSMenuItem(title: title, action: nil, keyEquivalent: "")
+        parent.image = Self.symbol(symbol)
+        parent.submenu = sub
+        return parent
+    }
+
+    /// One checkable item per preset; the tag is the preset index.
+    private func presetItems(_ names: [String], symbols: [String]? = nil, recommended: Int? = nil,
+                             _ action: Selector) -> [NSMenuItem] {
+        names.enumerated().map { i, name in
+            let it = makeItem(name, symbol: symbols?[i], action)
+            it.tag = i
+            if i == recommended { Self.markRecommended(it) }
+            return it
+        }
+    }
+
+    private func addSection(_ title: String, to menu: NSMenu) {
+        menu.addItem(.separator())
+        menu.addItem(.sectionHeader(title: title))
+    }
+
+    private static func markRecommended(_ item: NSMenuItem) {
+        if #available(macOS 14.4, *) {
+            item.subtitle = "Recommended"
+        } else {
+            item.title += "  ★"
+        }
+    }
+
+    private static func check(_ items: [NSMenuItem], selected: Int) {
+        for (i, item) in items.enumerated() { item.state = (i == selected) ? .on : .off }
+    }
+
+    private static func stateSymbol(_ state: MenuState) -> String {
+        if !state.ready { return "exclamationmark.triangle" }
+        if state.paused { return "pause.circle" }
+        if state.running { return "cursorarrow.motionlines" }
+        return "cursorarrow"
+    }
+
+    /// Menu icons are decorative (the title says it all), so no accessibility label.
+    /// Cached: the menu refreshes on every state change.
+    private static var symbolCache: [String: NSImage] = [:]
+
+    private static func symbol(_ name: String) -> NSImage? {
+        if let cached = symbolCache[name] { return cached }
+        let image = NSImage(systemSymbolName: name, accessibilityDescription: nil)
+        symbolCache[name] = image
+        return image
     }
 }

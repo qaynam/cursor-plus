@@ -255,7 +255,8 @@ final class Settings {
 
     // MARK: - Auto-pause
 
-    /// Seconds of real-user idle required before the bot resumes after a pause.
+    /// Seconds of real-user idle required before motion starts, and before it resumes
+    /// after the user touched the mouse or keyboard ("Start After Idle").
     var autoPauseCooldownSeconds: Double {
         get { defaults.double(forKey: Key.autoPauseCooldownSecs) }
         set { defaults.set(newValue, forKey: Key.autoPauseCooldownSecs) }

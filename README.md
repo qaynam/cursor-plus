@@ -99,24 +99,31 @@ That one grant covers moving the cursor, scrolling, and watching for your input.
 
 ## Using it
 
-Click the menu bar icon:
+Click the menu bar icon. The top line says what it is doing right now, and **Start** / **Stop** sits right under it. Stop is always a reliable kill. Everything else is grouped:
 
-- **Start and Stop** turn it on and off. Stop is always a reliable kill.
-- **Motion speed**: Calm, Balanced, Lively, Wild.
-- **Wander interval**: 10 to 20s, 20 to 40s, 30 to 60s, or 60 to 120s, how long it roams before resting.
-- **Occasional scrolling** lets it emit a rare slow scroll.
-- **Human idle pauses** drop short, natural pauses between bursts.
-- **Occasional long pauses** is off by default. Turn it on and it will rarely take a 30 to 90 second break. Heads up: during a long pause the Mac can read as away to presence based status, even though the display stays awake.
-- **Click defined areas** toggles whether it clicks inside your zones at all.
-- **Add or Edit click area** opens the overlay editor: drag to add a rectangle, click to select, drag the handles to resize, Delete to remove, Esc or Return when done.
-- **Clear click areas** removes all of them.
-- **Avoid defined areas** toggles whether it honours your no-go areas at all. Turning it off leaves the rectangles in place.
-- **Add or Edit avoid area** opens the same overlay editor, in red. Tab switches between click areas and avoid areas without leaving it, and whichever kind you are not editing stays visible behind, dimmed, so you can see where the two overlap.
-- **Clear avoid areas** removes all of them.
-- **Prevent display sleep** also holds the screen awake.
-- **Sleep Mac when display turns off** ends the session and puts the Mac to sleep when the display goes dark (hot corner, lock screen, the display sleep shortcut). With it off, motion still holds while the display is off, so it never lights the screen back up, and the Mac stays awake.
-- **Auto-start on Wi-Fi** starts a session by itself when the Mac joins a network you saved, and ends that session when it leaves. Add the network you are on from the submenu. A session you started yourself is never ended by it, and stopping by hand sticks until you next arrive. macOS only reveals the Wi-Fi name to apps with Location access, so it asks for that once. Your location is not used.
-- **Open at login** registers Cursor+ as a login item, which is what makes the Wi-Fi trigger useful.
+**Motion**
+
+- **Motion Speed**: Calm, Balanced, Lively, Wild.
+- **Wander Interval**: 10 to 20s, 20 to 40s, 30 to 60s, or 60 to 120s, how long it roams before resting.
+- **Occasional Scrolling** lets it emit a rare slow scroll.
+- **Human Idle Pauses** drop short, natural pauses between bursts.
+- **Occasional Long Pauses** is off by default. Turn it on and it will rarely take a 30 to 90 second break. Heads up: during a long pause the Mac can read as away to presence based status, even though the display stays awake.
+
+**Areas**
+
+- **Click Areas** holds the switch for clicking inside your zones at all, **Add / Edit Click Areas…**, which opens the overlay editor (drag to add a rectangle, click to select, drag the handles to resize, Delete to remove, Esc or Return when done), and **Remove All Click Areas**.
+- **Avoid Areas** is the same for your no-go areas, in red. Switching it off leaves the rectangles in place. In the editor, Tab flips between click areas and avoid areas without leaving it, and whichever kind you are not editing stays visible behind, dimmed, so you can see where the two overlap.
+
+**Display & Sleep**
+
+- **Prevent Display Sleep** also holds the screen awake.
+- **Sleep Mac When Display Turns Off** ends the session and puts the Mac to sleep when the display goes dark (hot corner, lock screen, the display sleep shortcut). With it off, motion still holds while the display is off, so it never lights the screen back up, and the Mac stays awake.
+
+**Automation**
+
+- **Start After Idle**: how long the mouse and keyboard have to sit untouched before it moves, from 3 seconds up to 30 minutes. It applies when a session starts and every time it resumes after you used the Mac, so with 5 minutes it behaves like a screen saver: it only takes over once you have walked away.
+- **Auto-Start on Wi-Fi** starts a session by itself when the Mac joins a network you saved, and ends that session when it leaves. Add the network you are on from the submenu. A session you started yourself is never ended by it, and stopping by hand sticks until you next arrive. macOS only reveals the Wi-Fi name to apps with Location access, so it asks for that once. Your location is not used.
+- **Open at Login** registers Cursor+ as a login item, which is what makes the triggers useful.
 
 ### If it ever seems stuck
 
