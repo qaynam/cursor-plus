@@ -1,54 +1,86 @@
 <div align="center">
 
+<img src="SupportFiles/AppIcon-1024.png" width="148" alt="Cursor+ app icon">
+
 # Cursor+
+
+**Keeps your Mac awake by moving the cursor like a hand, not a metronome.**
+
+![macOS 14+](https://img.shields.io/badge/macOS-14%2B-black?logo=apple&logoColor=white)
+![Swift 5.9](https://img.shields.io/badge/Swift-5.9-f05138?logo=swift&logoColor=white)
+![MIT](https://img.shields.io/badge/license-MIT-ff8a24)
+![No dependencies](https://img.shields.io/badge/dependencies-none-3fb950)
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/cursor-hero-dark.svg">
-  <img alt="Cursor+ tracing a human path and clicking a zone" src="docs/cursor-hero-light.svg" width="760">
+  <img alt="Cursor+ tracing a curved path and clicking a zone" src="docs/cursor-hero-light.svg" width="760">
 </picture>
-
-**A macOS menu bar app that keeps your Mac awake by moving the cursor the way a hand would, not the way a metronome would.**
-
-![Platform](https://img.shields.io/badge/macOS-14%2B-black?logo=apple&logoColor=white)
-![Swift](https://img.shields.io/badge/Swift-5.9-f05138?logo=swift&logoColor=white)
-![License](https://img.shields.io/badge/license-MIT-58a6ff)
-![Dependencies](https://img.shields.io/badge/dependencies-none-3fb950)
 
 </div>
 
-Cursor+ keeps your Mac looking active by nudging your real mouse cursor around. Not a twitchy jiggle, actual motion: it picks a spot, picks a speed, and follows a curved path there, with a faint hand tremor and the occasional slow scroll. The moment you touch your own mouse or keyboard it gets out of the way, and it only comes back once you have gone quiet. You can kill it any time by tapping Esc three times quickly.
-
-Out of the box it only moves and scrolls. If you want, you can draw **click areas**, rectangles you place on screen, and it will every so often curve into one and click a spot inside it. It only ever clicks inside the rectangles you draw, never random empty space, so put them on things that are safe to click.
-
-You can also draw **avoid areas**, rectangles the cursor is not allowed to enter. It never picks a destination inside one, never aims at one, and when a move would have cut through one it curves around instead. Put them over a Close button, a Send button, a video call window, anything you would rather it kept clear of.
+A menu bar app that moves your real cursor along curved, varied-speed paths, with the odd slow scroll, and steps aside the moment you touch the mouse or keyboard.
 
 > [!NOTE]
-> This is a personal tool for your own machine. It synthesizes input and listens for the Esc stop gesture, so do not run it on a work-managed (MDM) Mac.
+> A personal tool for your own Mac. It synthesizes input, so don't run it on a work-managed (MDM) Mac.
 
-## What it actually does, in a loop
+## Features
 
-Moving the cursor is what resets the system idle timer, which is the whole reason this works. Cursor+ runs a small state machine that wanders, sometimes scrolls, sometimes visits a click zone, then rests, over and over, and hands control straight back to you the instant you touch anything.
+- **Hand-like motion**: curved paths, four speed presets, a faint tremor, the occasional slow scroll.
+- **Out of your way**: pauses the instant you use the mouse or keyboard, freezes on password fields, stops with <kbd>Esc</kbd> <kbd>Esc</kbd> <kbd>Esc</kbd>.
+- **Start After Idle**: waits until the Mac has sat untouched for 3 seconds to 30 minutes, like a screen saver.
+- **Auto-start on Wi-Fi**: runs by itself on the networks you save, and stops when you leave them.
+- **Sleeps with the display**: optionally ends the session and sleeps the Mac when the display turns off.
+- **Click and avoid areas**: draw rectangles it may click inside, and ones it must never enter.
+
+## Install
+
+Needs macOS 14+ and the Swift toolchain.
+
+```bash
+./scripts/build_app.sh --open
+```
+
+Builds, signs and installs `Cursor+.app` to `/Applications`, then launches it. To keep permissions across rebuilds, create a self-signed **CursorPlus Self** code-signing certificate once; the script picks it up. Details are at the top of [`build_app.sh`](scripts/build_app.sh).
+
+## Permissions
+
+Turn on Cursor+ in **System Settings › Privacy & Security › Accessibility**. Auto-start on Wi-Fi also asks for Location, only to read the network name.
+
+If something is missing, the top line of the menu reads **needs permission · Fix…**. Click it for a checklist and a button straight to the right settings pane.
+
+## Using it
+
+| Menu section | What's there |
+|---|---|
+| **Motion** | speed preset, wander interval, scrolling, idle pauses |
+| **Areas** | click areas and avoid areas, drawn in a full-screen editor (<kbd>Tab</kbd> switches, <kbd>Esc</kbd> done) |
+| **Display & Sleep** | prevent display sleep, sleep the Mac when the display turns off |
+| **Automation** | Start After Idle, Auto-Start on Wi-Fi, Open at Login |
+
+To stop: <kbd>Esc</kbd> ×3, **Stop** in the menu, or `open cursorplus://quit`. If the menu bar icon is hidden behind the notch, open the app again and its menu pops up at the mouse.
+
+<details>
+<summary><b>How it works</b></summary>
+<br>
+
+A small state machine wanders, sometimes scrolls, sometimes visits a click area, then rests, and hands control back the moment you touch anything.
 
 ```mermaid
 stateDiagram-v2
   [*] --> Idle
   Idle --> Moving: Start
   Moving --> Scrolling: now and then
-  Moving --> ApproachingClick: if you set a click zone
+  Moving --> Clicking: if you set a click area
   Moving --> Resting: most of the time
   Scrolling --> Resting
-  ApproachingClick --> ClickDwell
-  ClickDwell --> Clicking
   Clicking --> Resting
   Resting --> Moving: after a short pause
   Moving --> Paused: you touch the mouse, or Secure Input
-  Paused --> Moving: once you go quiet
+  Paused --> Moving: once you've been idle long enough
   Moving --> Idle: Esc Esc Esc
-  note left of Paused : pause and the triple-Esc stop<br/>work from any state, not just Moving
-  note right of Moving : every destination and every path<br/>routes around your avoid areas
 ```
 
-Each move samples a speed class, from very slow to very fast, then a real velocity inside it, and follows a curved path with a band-limited 8 to 12 Hz tremor layered on, the same frequency as a real hand. Four presets shift where that speed lives.
+Each move picks a speed class, then a velocity inside it. The four presets shift where that speed lives:
 
 <div align="center">
 <picture>
@@ -57,101 +89,19 @@ Each move samples a speed class, from very slow to very fast, then a real veloci
 </picture>
 </div>
 
-## Going around what you told it to leave alone
+Avoid areas are handled before a path exists: destinations are picked outside them, and a move that would cut through one is routed around its corners as a single continuous curve.
 
-An avoid area is not a fence the cursor bumps into. Clamping motion at the edge of a box would make it slide along an invisible wall, which looks worse than the motion it is there to protect. So the avoiding happens before a path exists, not while one is playing.
-
-Each area is grown by a comfort margin that is re-rolled on every single move, so the distance it keeps is never a fixed number you could measure. Destinations are picked outside that margin, so the cursor never even aims at one. If the straight line to a destination would still cut through, a shortest way round is worked out through the corners of the grown boxes, and those corners become via-points rather than stops: the path physics hands over to the next one while still well clear of it, carrying its velocity through the turn. What comes out is one continuous curve, not a straight line with a corner bolted onto it. Momentum through a turn carries wide, and wide is the side away from the box.
-
-Two checks sit behind all that, one on the finished path and one on every point before it is posted. The margin is wide enough to absorb the natural wander of the motion, so in practice neither of them has anything to correct, which is the whole point: nothing ever gets clamped, so nothing ever looks clamped. Detoured moves come out with the same speed profile and the same heading changes as ordinary ones.
-
-If you park the cursor inside an avoid area yourself and walk away, it does not snap out. It just leaves the way a hand would, and then stays out.
-
-## How it knows its own moves, and how it stays safe
-
-A jiggler that pauses when you touch the mouse has a problem: it has to tell its own motion apart from yours, or it will pause on itself and never move. Cursor+ does this out of band. It keeps a small private log of every move it just posted, and the kill switch checks against that log instead of stamping a marker on the events. It never tags its own output. The one thing no app can hide is the process ID macOS attaches to every posted event, but nothing Cursor+ itself adds gives the motion away.
-
-- It only clicks inside the areas you define, never random or empty space. With no areas set it just moves and scrolls.
-- It stays out of any avoid areas you draw, and will not click inside a click area that one covers.
-- It auto pauses the instant you use the mouse or keyboard, and comes back once you go idle.
-- It freezes while a password field or the lock screen is focused, so the Esc kill gesture is never in doubt.
-- The triple Esc kill switch runs on its own self-healing global tap with a backup monitor, completely separate from the motion. Cursor+ never synthesizes key events, so nothing it does can interfere with the stop.
-
-## Build
-
-You need the Swift toolchain on macOS 14 or newer. I built and tested it on macOS 26 on Apple Silicon.
-
-```bash
-./scripts/build_app.sh --open
-```
-
-That builds a release binary, assembles and signs `Cursor+.app` under `.build/`, installs it to `/Applications` (or `~/Applications`), and launches it. A copy that is already running is quit first and relaunched. The signed bundle never lands in the working tree, and no signing identity is written to a tracked file: put one in `scripts/local.env`, which is gitignored, if you want something other than the default.
-
-A cursor icon shows up in your menu bar. Running `swift build` on its own only gives you the bare binary, the menu bar behavior needs the assembled `.app`. To make the Accessibility grant survive rebuilds, sign with a stable identity. The instructions are at the top of [`scripts/build_app.sh`](scripts/build_app.sh).
-
-## First run and permissions
-
-macOS will ask for permission and deep link you to the right pane:
-
-**System Settings, Privacy and Security, Accessibility**, then turn on **Cursor+**.
-
-That one grant covers moving the cursor, scrolling, and watching for your input. Auto-Start on Wi-Fi additionally needs Location access, only to read the network name.
-
-If anything is missing, the top line of the menu says so and is clickable: it lists what Cursor+ has and what it lacks, and opens the right pane in System Settings. **Permissions…** near the bottom of the menu shows the same list at any time.
-
-If Settings shows Cursor+ switched on but the menu still says it needs permission, that switch belongs to an earlier build: an ad-hoc signed rebuild counts as a different app. Choose **Reset and Ask Again** in that dialog, then switch the fresh entry on. Signing with a stable identity (see the top of [`scripts/build_app.sh`](scripts/build_app.sh)) stops this from happening on every rebuild.
-
-## Using it
-
-Click the menu bar icon. The top line says what it is doing right now, and **Start** / **Stop** sits right under it. Stop is always a reliable kill. Everything else is grouped:
-
-**Motion**
-
-- **Motion Speed**: Calm, Balanced, Lively, Wild.
-- **Wander Interval**: 10 to 20s, 20 to 40s, 30 to 60s, or 60 to 120s, how long it roams before resting.
-- **Occasional Scrolling** lets it emit a rare slow scroll.
-- **Human Idle Pauses** drop short, natural pauses between bursts.
-- **Occasional Long Pauses** is off by default. Turn it on and it will rarely take a 30 to 90 second break. Heads up: during a long pause the Mac can read as away to presence based status, even though the display stays awake.
-
-**Areas**
-
-- **Click Areas** holds the switch for clicking inside your zones at all, **Add / Edit Click Areas…**, which opens the overlay editor (drag to add a rectangle, click to select, drag the handles to resize, Delete to remove, Esc or Return when done), and **Remove All Click Areas**.
-- **Avoid Areas** is the same for your no-go areas, in red. Switching it off leaves the rectangles in place. In the editor, Tab flips between click areas and avoid areas without leaving it, and whichever kind you are not editing stays visible behind, dimmed, so you can see where the two overlap.
-
-**Display & Sleep**
-
-- **Prevent Display Sleep** also holds the screen awake.
-- **Sleep Mac When Display Turns Off** ends the session and puts the Mac to sleep when the display goes dark (hot corner, lock screen, the display sleep shortcut). With it off, motion still holds while the display is off, so it never lights the screen back up, and the Mac stays awake.
-
-**Automation**
-
-- **Start After Idle**: how long the mouse and keyboard have to sit untouched before it moves, from 3 seconds up to 30 minutes. It applies when a session starts and every time it resumes after you used the Mac, so with 5 minutes it behaves like a screen saver: it only takes over once you have walked away.
-- **Auto-Start on Wi-Fi** starts a session by itself when the Mac joins a network you saved, and ends that session when it leaves. Add the network you are on from the submenu. A session you started yourself is never ended by it, and stopping by hand sticks until you next arrive. macOS only reveals the Wi-Fi name to apps with Location access, so it asks for that once. Your location is not used.
-- **Open at Login** registers Cursor+ as a login item, which is what makes the triggers useful.
-
-### If it ever seems stuck
-
-- Only one copy runs at a time. Opening the app again while it runs pops its menu up at the mouse, which also helps when the icon is hidden behind the notch.
-- The area editor sits under the menu bar, so the Cursor+ menu and Quit are always clickable, and Esc closes it even if another app grabbed focus. Triple Esc closes it too.
-- `open cursorplus://quit` quits it from a terminal.
-- If the Accessibility grant goes away, or its own input monitor stops hearing anything, it stops itself instead of carrying on blind, and the menu says why.
-
-To stop at any time, tap Esc three times quickly, or click Stop.
-
-## How it is put together
-
-| File | What it does |
+| File | Role |
 |---|---|
-| `Sources/CursorPlus/InputEngine.swift` | posts real cursor moves and scrolls with CGEvent, with hardware consistent deltas |
-| `Sources/CursorPlus/MovementEngine.swift` | speed classes, velocity sampling, the curved path geometry, tremor, and the scroll player |
-| `Sources/CursorPlus/StateMachine.swift` | the rhythm: wander, maybe scroll, maybe visit a click zone, rest, repeat |
-| `Sources/CursorPlus/AvoidZones.swift` | picking targets, routing paths and the two checks that keep the cursor out of your no-go areas |
-| `Sources/CursorPlus/AutoPause.swift`, `SyntheticInputLog.swift` | hands control back the moment you touch input, and tells its own motion from yours |
-| `Sources/CursorPlus/KillSwitch.swift` | the self-healing global tap behind the triple Esc stop |
-| `Sources/CursorPlus/ZoneRect.swift`, `ZoneEditor.swift` | the click and avoid rectangles, and the full screen editor for drawing both |
-| `Sources/CursorPlus/NetworkTrigger.swift` | watches the Wi-Fi network for the auto-start trigger, and holds the Location grant that reading its name needs |
-| `Sources/CursorPlus/SingleInstance.swift` | the lock that keeps a second copy from running alongside the first |
+| `StateMachine.swift` | the wander, scroll, click, rest rhythm |
+| `MovementEngine.swift`, `InputEngine.swift` | curved paths and speed, and posting the moves |
+| `AvoidZones.swift` | routing around avoid areas |
+| `AutoPause.swift`, `KillSwitch.swift` | stepping aside on real input, and the Esc Esc Esc stop |
+| `NetworkTrigger.swift` | Auto-start on Wi-Fi |
+| `ZoneEditor.swift` | the full-screen area editor |
+
+</details>
 
 ## License
 
-[MIT](LICENSE). Copyright 2026 Ahmed Ufuk Serce. Personal tool. Whatever you do with it is on you, including running it somewhere it is actually allowed.
+[MIT](LICENSE) © 2026 Ahmed Ufuk Serce. Use it only where that's allowed.
