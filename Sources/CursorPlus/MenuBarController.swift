@@ -9,6 +9,12 @@ struct MenuState {
     let ready: Bool
     let killSwitchArmed: Bool
     let preventSleep: Bool
+    let sleepWhenDisplayOff: Bool
+    let launchAtLogin: Bool
+    let triggerEnabled: Bool
+    let triggerSSIDs: [String]
+    let currentSSID: String?
+    let locationAuthorized: Bool
     let scrollEnabled: Bool
     let idlePausesEnabled: Bool
     let longPausesEnabled: Bool
@@ -22,7 +28,7 @@ struct MenuState {
 
 /// Owns the menu-bar `NSStatusItem` and its menu. Menu items target the
 /// `AppController` (an NSObject) via selectors — the standard AppKit pattern.
-final class MenuBarController {
+final class MenuBarController: NSObject, NSMenuDelegate {
 
     private var statusItem: NSStatusItem!
     private weak var controller: AppController?
@@ -30,6 +36,11 @@ final class MenuBarController {
     private var statusLine: NSMenuItem!
     private var toggleItem: NSMenuItem!
     private var preventSleepItem: NSMenuItem!
+    private var sleepOnDisplayOffItem: NSMenuItem!
+    private var launchAtLoginItem: NSMenuItem!
+    private var triggerParent: NSMenuItem!
+    private var triggerMenu: NSMenu!
+    private var lastState: MenuState?
     private var scrollItem: NSMenuItem!
     private var idlePausesItem: NSMenuItem!
     private var longPausesItem: NSMenuItem!
@@ -137,6 +148,21 @@ final class MenuBarController {
         preventSleepItem.target = controller
         menu.addItem(preventSleepItem)
 
+        sleepOnDisplayOffItem = NSMenuItem(title: "Sleep Mac when display turns off",
+                                           action: #selector(AppController.toggleSleepWhenDisplayOff),
+                                           keyEquivalent: "")
+        sleepOnDisplayOffItem.target = controller
+        menu.addItem(sleepOnDisplayOffItem)
+
+        // Wi-Fi trigger: rebuilt each time it opens, since the saved list and the
+        // current network both change underneath it.
+        triggerMenu = NSMenu()
+        triggerMenu.autoenablesItems = false
+        triggerMenu.delegate = self
+        triggerParent = NSMenuItem(title: "Auto-start on Wi-Fi", action: nil, keyEquivalent: "")
+        triggerParent.submenu = triggerMenu
+        menu.addItem(triggerParent)
+
         menu.addItem(.separator())
 
         // Click zones: occasionally click inside user-defined regions.
@@ -187,6 +213,12 @@ final class MenuBarController {
         permItem.target = controller
         menu.addItem(permItem)
 
+        launchAtLoginItem = NSMenuItem(title: "Open at login",
+                                       action: #selector(AppController.toggleLaunchAtLogin),
+                                       keyEquivalent: "")
+        launchAtLoginItem.target = controller
+        menu.addItem(launchAtLoginItem)
+
         let resetItem = NSMenuItem(title: "Reset to defaults",
                                    action: #selector(AppController.resetDefaults),
                                    keyEquivalent: "")
@@ -208,7 +240,14 @@ final class MenuBarController {
         statusItem.menu = menu
     }
 
+    /// Show the menu at the mouse. For when the status item can't be clicked: hidden
+    /// behind the notch, or a crowded menu bar.
+    func popUpAtMouse() {
+        statusItem.menu?.popUp(positioning: nil, at: NSEvent.mouseLocation, in: nil)
+    }
+
     func refresh(_ state: MenuState) {
+        lastState = state
         statusLine.title = state.statusText
         toggleItem.title = state.toggleTitle
         // Only allow starting when the kill switch is actually live (or to stop).
@@ -219,6 +258,9 @@ final class MenuBarController {
             : "Stop gesture INACTIVE — grant Input Monitoring"
 
         preventSleepItem.state = state.preventSleep ? .on : .off
+        sleepOnDisplayOffItem.state = state.sleepWhenDisplayOff ? .on : .off
+        launchAtLoginItem.state = state.launchAtLogin ? .on : .off
+        triggerParent.state = state.triggerEnabled ? .on : .off
         scrollItem.state = state.scrollEnabled ? .on : .off
         idlePausesItem.state = state.idlePausesEnabled ? .on : .off
         longPausesItem.state = state.longPausesEnabled ? .on : .off
@@ -255,5 +297,68 @@ final class MenuBarController {
         }
         statusItem.button?.image = NSImage(systemSymbolName: symbol,
                                            accessibilityDescription: "Cursor+")
+    }
+
+    // MARK: - Wi-Fi trigger submenu
+
+    func menuNeedsUpdate(_ menu: NSMenu) {
+        guard menu === triggerMenu else { return }
+        controller?.refreshNetwork()   // re-reads the SSID and pushes a fresh state
+        guard let state = lastState else { return }
+        menu.removeAllItems()
+
+        let enable = NSMenuItem(title: "Start automatically on these networks",
+                                action: #selector(AppController.toggleNetworkTrigger),
+                                keyEquivalent: "")
+        enable.target = controller
+        enable.state = state.triggerEnabled ? .on : .off
+        menu.addItem(enable)
+
+        menu.addItem(.separator())
+
+        if !state.locationAuthorized {
+            let why = NSMenuItem(title: "macOS shows the Wi-Fi name only with Location access",
+                                 action: nil, keyEquivalent: "")
+            why.isEnabled = false
+            menu.addItem(why)
+            let allow = NSMenuItem(title: "Allow Location access…",
+                                   action: #selector(AppController.requestLocationAccess),
+                                   keyEquivalent: "")
+            allow.target = controller
+            menu.addItem(allow)
+        } else if let ssid = state.currentSSID {
+            let now = NSMenuItem(title: "Now on: \(ssid)", action: nil, keyEquivalent: "")
+            now.isEnabled = false
+            menu.addItem(now)
+            let add = NSMenuItem(title: "Add “\(ssid)”",
+                                 action: #selector(AppController.addCurrentNetwork),
+                                 keyEquivalent: "")
+            add.target = controller
+            add.isEnabled = !state.triggerSSIDs.contains(ssid)
+            menu.addItem(add)
+        } else {
+            let none = NSMenuItem(title: "Not on Wi-Fi", action: nil, keyEquivalent: "")
+            none.isEnabled = false
+            menu.addItem(none)
+        }
+
+        menu.addItem(.separator())
+
+        let header = NSMenuItem(title: state.triggerSSIDs.isEmpty
+                                    ? "No saved networks"
+                                    : "Saved networks (click to remove)",
+                                action: nil, keyEquivalent: "")
+        header.isEnabled = false
+        menu.addItem(header)
+        for ssid in state.triggerSSIDs {
+            let it = NSMenuItem(title: ssid,
+                                action: #selector(AppController.removeTriggerNetwork(_:)),
+                                keyEquivalent: "")
+            it.target = controller
+            it.representedObject = ssid
+            it.state = (ssid == state.currentSSID) ? .on : .off   // ✓ = the one you're on
+            it.indentationLevel = 1
+            menu.addItem(it)
+        }
     }
 }

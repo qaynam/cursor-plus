@@ -37,6 +37,9 @@ final class Settings {
         static let weightFast             = "weightFast"
         static let weightVeryFast         = "weightVeryFast"
         static let preventDisplaySleep    = "preventDisplaySleep"
+        static let sleepWhenDisplayOff    = "sleepWhenDisplayOff"
+        static let networkTriggerEnabled  = "networkTriggerEnabled"
+        static let triggerSSIDs           = "triggerSSIDs"
     }
 
     private init() {
@@ -67,7 +70,9 @@ final class Settings {
             Key.weightNormal:          4.0,
             Key.weightFast:            2.0,
             Key.weightVeryFast:        1.0,
-            Key.preventDisplaySleep:   true
+            Key.preventDisplaySleep:   true,
+            Key.sleepWhenDisplayOff:   false,
+            Key.networkTriggerEnabled: false
         ])
     }
 
@@ -270,6 +275,29 @@ final class Settings {
     var preventDisplaySleep: Bool {
         get { defaults.bool(forKey: Key.preventDisplaySleep) }
         set { defaults.set(newValue, forKey: Key.preventDisplaySleep) }
+    }
+
+    /// When the display goes off while running (hot corner, lock screen, the display
+    /// sleep shortcut), end the session and put the Mac to sleep instead of holding
+    /// it awake with the screen dark.
+    var sleepWhenDisplayOff: Bool {
+        get { defaults.bool(forKey: Key.sleepWhenDisplayOff) }
+        set { defaults.set(newValue, forKey: Key.sleepWhenDisplayOff) }
+    }
+
+    // MARK: - Wi-Fi trigger
+
+    /// Start a session by itself on joining one of `triggerSSIDs`, and end that
+    /// session on leaving.
+    var networkTriggerEnabled: Bool {
+        get { defaults.bool(forKey: Key.networkTriggerEnabled) }
+        set { defaults.set(newValue, forKey: Key.networkTriggerEnabled) }
+    }
+
+    /// Wi-Fi network names (SSIDs) the trigger fires on.
+    var triggerSSIDs: [String] {
+        get { defaults.stringArray(forKey: Key.triggerSSIDs) ?? [] }
+        set { defaults.set(newValue, forKey: Key.triggerSSIDs) }
     }
 
     // MARK: - Speed-class weights

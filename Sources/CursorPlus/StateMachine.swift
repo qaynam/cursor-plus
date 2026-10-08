@@ -63,6 +63,11 @@ final class StateMachine {
     /// is open, so the bot doesn't fight the user's mouse. Honored like a pause.
     var uiHold = false
 
+    /// Set by AppController while the display is off or the Mac is going to sleep.
+    /// A posted move would wake a display the user just turned off, so nothing is
+    /// posted at all. Honored like a pause.
+    var sleepHold = false
+
     /// Longest a single sub-move may take, so one slow move can't run forever.
     private let maxMoveSeconds = 4.0
 
@@ -175,7 +180,7 @@ final class StateMachine {
         // Pause instantly on real user input OR when the app cannot guarantee the
         // kill switch (safetyHold); resume only after a quiet cooldown.
         let userActive = autoPause.shouldPause(cooldown: settings.autoPauseCooldownSeconds)
-        if userActive || safetyHold || uiHold {
+        if userActive || safetyHold || uiHold || sleepHold {
             releaseClickIfHeld()            // never leave a button held across a pause
             if !isPaused { isPaused = true; onStateChange?() }
             return

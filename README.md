@@ -82,9 +82,10 @@ A jiggler that pauses when you touch the mouse has a problem: it has to tell its
 You need the Swift toolchain on macOS 14 or newer. I built and tested it on macOS 26 on Apple Silicon.
 
 ```bash
-./scripts/build_app.sh
-open "Cursor+.app"
+./scripts/build_app.sh --open
 ```
+
+That builds a release binary, assembles and signs `Cursor+.app` under `.build/`, installs it to `/Applications` (or `~/Applications`), and launches it. A copy that is already running is quit first and relaunched. The signed bundle never lands in the working tree, and no signing identity is written to a tracked file: put one in `scripts/local.env`, which is gitignored, if you want something other than the default.
 
 A cursor icon shows up in your menu bar. Running `swift build` on its own only gives you the bare binary, the menu bar behavior needs the assembled `.app`. To make the Accessibility grant survive rebuilds, sign with a stable identity. The instructions are at the top of [`scripts/build_app.sh`](scripts/build_app.sh).
 
@@ -113,6 +114,16 @@ Click the menu bar icon:
 - **Add or Edit avoid area** opens the same overlay editor, in red. Tab switches between click areas and avoid areas without leaving it, and whichever kind you are not editing stays visible behind, dimmed, so you can see where the two overlap.
 - **Clear avoid areas** removes all of them.
 - **Prevent display sleep** also holds the screen awake.
+- **Sleep Mac when display turns off** ends the session and puts the Mac to sleep when the display goes dark (hot corner, lock screen, the display sleep shortcut). With it off, motion still holds while the display is off, so it never lights the screen back up, and the Mac stays awake.
+- **Auto-start on Wi-Fi** starts a session by itself when the Mac joins a network you saved, and ends that session when it leaves. Add the network you are on from the submenu. A session you started yourself is never ended by it, and stopping by hand sticks until you next arrive. macOS only reveals the Wi-Fi name to apps with Location access, so it asks for that once. Your location is not used.
+- **Open at login** registers Cursor+ as a login item, which is what makes the Wi-Fi trigger useful.
+
+### If it ever seems stuck
+
+- Only one copy runs at a time. Opening the app again while it runs pops its menu up at the mouse, which also helps when the icon is hidden behind the notch.
+- The area editor sits under the menu bar, so the Cursor+ menu and Quit are always clickable, and Esc closes it even if another app grabbed focus. Triple Esc closes it too.
+- `open cursorplus://quit` quits it from a terminal.
+- If the Accessibility grant goes away, or its own input monitor stops hearing anything, it stops itself instead of carrying on blind, and the menu says why.
 
 To stop at any time, tap Esc three times quickly, or click Stop.
 
@@ -127,6 +138,8 @@ To stop at any time, tap Esc three times quickly, or click Stop.
 | `Sources/CursorPlus/AutoPause.swift`, `SyntheticInputLog.swift` | hands control back the moment you touch input, and tells its own motion from yours |
 | `Sources/CursorPlus/KillSwitch.swift` | the self-healing global tap behind the triple Esc stop |
 | `Sources/CursorPlus/ZoneRect.swift`, `ZoneEditor.swift` | the click and avoid rectangles, and the full screen editor for drawing both |
+| `Sources/CursorPlus/NetworkTrigger.swift` | watches the Wi-Fi network for the auto-start trigger, and holds the Location grant that reading its name needs |
+| `Sources/CursorPlus/SingleInstance.swift` | the lock that keeps a second copy from running alongside the first |
 
 ## License
 

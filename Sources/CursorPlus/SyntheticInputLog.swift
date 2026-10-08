@@ -36,6 +36,10 @@ final class SyntheticInputLog {
 
     private var entries: [Entry] = []
 
+    /// When the oldest event posted since the tap last delivered anything went out,
+    /// or nil once the tap has delivered something after our last post.
+    private var undeliveredSince: TimeInterval?
+
     private func now() -> TimeInterval { ProcessInfo.processInfo.systemUptime }
 
     /// Record a synthetic cursor move at `point` (CG global coordinates).
@@ -55,6 +59,7 @@ final class SyntheticInputLog {
     }
 
     private func append(_ e: Entry) {
+        if undeliveredSince == nil { undeliveredSince = e.time }
         entries.append(e)
         if entries.count > capacity {
             entries.removeFirst(entries.count - capacity)
@@ -100,8 +105,24 @@ final class SyntheticInputLog {
         return false
     }
 
+    /// Called by the tap for every event it sees, ours or the user's.
+    func noteTapDelivery() {
+        undeliveredSince = nil
+    }
+
+    /// True when events have been posted for `seconds` without the tap seeing any of
+    /// them. Every posted move, scroll and press is in the tap's mask, so silence
+    /// means the tap is installed and "enabled" but deaf (typically the Accessibility
+    /// grant was revoked, or the app was rebuilt underneath itself). Auto-pause and
+    /// the Esc stop both ride on that tap, so motion must not continue.
+    func tapLooksDeaf(after seconds: TimeInterval) -> Bool {
+        guard let since = undeliveredSince else { return false }
+        return now() - since > seconds
+    }
+
     /// Drop everything (used when the bot stops, so stale entries can't linger).
     func reset() {
         entries.removeAll()
+        undeliveredSince = nil
     }
 }

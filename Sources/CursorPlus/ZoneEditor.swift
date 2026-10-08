@@ -304,8 +304,10 @@ final class ZoneEditorView: NSView {
         let size = text.boundingRect(with: NSSize(width: bounds.width, height: .greatestFiniteMagnitude),
                                      options: [.usesLineFragmentOrigin]).size
         let pad: CGFloat = 10
-        // Top of a flipped view is y = 0.
-        let box = CGRect(x: bounds.midX - (size.width + pad * 2) / 2, y: 18,
+        // Top of a flipped view is y = 0. The menu bar now sits above the overlay, so
+        // start below the tallest one (a notched display's is taller than the rest).
+        let menuBar = NSScreen.screens.map { $0.frame.maxY - $0.visibleFrame.maxY }.max() ?? 0
+        let box = CGRect(x: bounds.midX - (size.width + pad * 2) / 2, y: menuBar + 18,
                          width: size.width + pad * 2, height: size.height + pad * 2)
         NSColor.black.withAlphaComponent(0.62).setFill()
         NSBezierPath(roundedRect: box, xRadius: 7, yRadius: 7).fill()
@@ -322,6 +324,13 @@ final class ZoneEditorController {
     private let settings: Settings
     private var window: OverlayWindow?
     private var view: ZoneEditorView?
+    private var escMonitor: Any?
+
+    /// Just under the menu bar. The overlay covers every display and swallows every
+    /// click, so it must never cover the one control that can always end it: the
+    /// Cursor+ menu (and its Quit). At `.screenSaver` a lost key focus left the user
+    /// with a screen they could neither click through nor dismiss.
+    private static let overlayLevel = NSWindow.Level(rawValue: NSWindow.Level.mainMenu.rawValue - 1)
 
     /// Which kind is currently being edited.
     private(set) var kind: ZoneKind = .click
@@ -338,6 +347,7 @@ final class ZoneEditorController {
     func open(_ kind: ZoneKind) {
         if isOpen {
             if kind != self.kind { persist(); self.kind = kind; loadIntoView() }
+            NSApp.activate(ignoringOtherApps: true)
             window?.makeKeyAndOrderFront(nil)
             return
         }
@@ -349,7 +359,7 @@ final class ZoneEditorController {
         win.isOpaque = false
         win.backgroundColor = .clear
         win.hasShadow = false
-        win.level = .screenSaver
+        win.level = Self.overlayLevel
         win.ignoresMouseEvents = false
         win.isReleasedWhenClosed = false
         win.collectionBehavior = [.canJoinAllSpaces, .stationary, .fullScreenAuxiliary]
@@ -370,10 +380,19 @@ final class ZoneEditorController {
         NSApp.activate(ignoringOtherApps: true)
         win.makeKeyAndOrderFront(nil)
         win.makeFirstResponder(v)
+
+        // If activation is refused or another app takes focus, keystrokes stop
+        // reaching the overlay while it still covers the screen. Esc has to close it
+        // regardless of who has focus, so also listen for it globally.
+        escMonitor = NSEvent.addGlobalMonitorForEvents(matching: .keyDown) { [weak self] ev in
+            if ev.keyCode == 53 { self?.close() }
+        }
     }
 
     func close() {
+        guard isOpen else { return }
         persist()
+        if let m = escMonitor { NSEvent.removeMonitor(m); escMonitor = nil }
         window?.orderOut(nil)
         window = nil
         view = nil

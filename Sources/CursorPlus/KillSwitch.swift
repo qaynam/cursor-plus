@@ -111,8 +111,22 @@ final class KillSwitch {
         return CGEvent.tapIsEnabled(tap: newTap)
     }
 
+    /// Drop the current tap and install a fresh one. For a tap that still reports
+    /// enabled but has stopped seeing events, which the health timer cannot spot.
+    @discardableResult
+    func reinstall() -> Bool {
+        removeTap()
+        return installTapIfNeeded()
+    }
+
     private func removeTap() {
-        if let tap = tap { CGEvent.tapEnable(tap: tap, enable: false) }
+        if let tap = tap {
+            CGEvent.tapEnable(tap: tap, enable: false)
+            // Invalidate, not just disable: a disabled tap stays registered with the
+            // window server, and the health timer would otherwise leave one behind
+            // every 2s for as long as reinstalling keeps failing.
+            CFMachPortInvalidate(tap)
+        }
         if let source = runLoopSource {
             CFRunLoopRemoveSource(CFRunLoopGetCurrent(), source, .commonModes)
         }
@@ -127,6 +141,7 @@ final class KillSwitch {
             if let tap = tap { CGEvent.tapEnable(tap: tap, enable: true) }
             return
         }
+        syntheticLog.noteTapDelivery()   // the tap is alive, whoever's event this is
         // Ignore our OWN synthetic moves/scrolls — matched against the private
         // in-memory log by position/time, with nothing stamped on the event itself.
         if type == .mouseMoved || type == .scrollWheel ||

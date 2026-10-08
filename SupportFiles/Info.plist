@@ -25,6 +25,12 @@
     <!-- Menu-bar agent: no Dock icon, no app switcher entry. -->
     <key>LSUIElement</key>
     <true/>
+    <!-- Auto-start on Wi-Fi: macOS only reveals the network name (SSID) to apps
+         that hold Location access. -->
+    <key>NSLocationUsageDescription</key>
+    <string>Cursor+ reads the Wi-Fi network name so it can start on the networks you choose. It never uses your location.</string>
+    <key>NSLocationWhenInUseUsageDescription</key>
+    <string>Cursor+ reads the Wi-Fi network name so it can start on the networks you choose. It never uses your location.</string>
     <key>NSHumanReadableCopyright</key>
     <string>Cursor+ - personal use.</string>
     <!-- Programmatic on/off via URL scheme. PHB (and any other automation)
